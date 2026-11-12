@@ -18,4 +18,4 @@ data/
 *.db
 *.sqlite
 
-src-tauri/gen/
+**/src-tauri/gen/
