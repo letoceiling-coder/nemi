@@ -50,6 +50,7 @@ export const api = {
   models: () => req<ProviderModels[]>('/models'),
   putSecret: (name: string, value: string) => req<{ ok: boolean }>(`/system/secrets/${name}`, { method: 'PUT', body: JSON.stringify({ value }) }),
   audit: () => req<{ action: string; detail: string; at: string }[]>('/system/audit'),
+  logs: (lines = 200, level = '') => req<{ file: string; lines: string[] }>(`/system/logs?lines=${lines}${level ? `&level=${level}` : ''}`),
   conversations: () => req<Conv[]>('/assistant/conversations'),
   conversation: (id: string) => req<{ id: string; title: string; messages: { role: 'user' | 'assistant'; content: string; provider?: string; model?: string }[] }>(`/assistant/conversations/${id}`),
   renameConversation: (id: string, title: string) => req<{ ok: boolean }>(`/assistant/conversations/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
@@ -62,7 +63,7 @@ export type FactKind = 'profile' | 'preference' | 'person' | 'project' | 'fact'
 export interface Fact { id: string; text: string; kind: FactKind; source: 'auto' | 'manual'; conv_id?: string; created: string; updated: string }
 export const memoryApi = {
   list: (q = '') => req<Fact[]>(`/memory${q ? `?q=${encodeURIComponent(q)}` : ''}`),
-  add: (text: string, kind: FactKind = 'fact') => req<Fact & { created: boolean }>('/memory', { method: 'POST', body: JSON.stringify({ text, kind }) }),
+  add: (text: string, kind: FactKind = 'fact') => req<Fact & { new: boolean }>('/memory', { method: 'POST', body: JSON.stringify({ text, kind }) }),
   edit: (id: string, text: string, kind: FactKind) => req<Fact>(`/memory/${id}`, { method: 'PATCH', body: JSON.stringify({ text, kind }) }),
   remove: (id: string) => req<{ ok: boolean }>(`/memory/${id}`, { method: 'DELETE' }),
   clear: () => req<{ ok: boolean; deleted: number }>('/memory', { method: 'DELETE' }),

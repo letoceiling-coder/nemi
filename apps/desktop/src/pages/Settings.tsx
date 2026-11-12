@@ -2,6 +2,7 @@ import { useState } from 'react'
 import clsx from 'clsx'
 import { Palette as PaletteIcon, ShieldCheck, RefreshCw, Activity, HardDrive, Bell, Loader2, Download, Search, User, Plug, Cpu, ListChecks, LogOut, Brain } from 'lucide-react'
 import { MemoryPanel } from './Memory'
+import { DiagnosticsPanel } from './Diagnostics'
 import { useApp, SettingsCat as Cat } from '../store'
 import { Card, Switch, Badge, Button, Progress, Input, Tabs } from '../ui'
 import { getUser, userKey } from '../api'
@@ -91,7 +92,7 @@ export function SettingsPage() {
         {cat === 'storage' && <div className="space-y-4"><Card><Row title="Selectel S3" hint="Бакет: personal-assistant · ru-1"><Badge tone="ok" dot>Подключено</Badge></Row><Row title="Использовано"><div className="w-40"><Progress value={34} /><div className="mt-1 text-right text-[12px] text-fg3">8.2 из 24 ГБ</div></div></Row><Row title="Проверка соединения"><Button size="sm" onClick={() => notify('Соединение в порядке')}>Проверить</Button></Row></Card></div>}
         {cat === 'updates' && <Updates />}
         {cat === 'memory' && <MemoryPanel />}
-        {cat === 'diagnostics' && <Card>{[['Backend', 'работает', 'ok'], ['Ollama', 'работает', 'ok'], ['Qdrant', 'работает', 'ok'], ['SQLite', '124 МБ', 'ok'], ['S3', 'подключено', 'ok'], ['RAM', '18 / 64 ГБ', 'ok'], ['VRAM', '20 / 24 ГБ', 'warn']].map(([k, v, tone]) => <Row key={k} title={k}><Badge tone={tone as 'ok' | 'warn'} dot>{v}</Badge></Row>)}</Card>}
+        {cat === 'diagnostics' && <DiagnosticsPanel />}
       </div></div>}
     </div>
   )

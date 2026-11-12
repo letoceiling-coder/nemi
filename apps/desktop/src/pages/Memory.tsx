@@ -28,7 +28,7 @@ export function MemoryPanel() {
   const add = async () => {
     if (!draft.trim()) return
     setBusy(true)
-    try { const f = await memoryApi.add(draft.trim(), kind); notify(f.created ? 'Запомнено' : 'Такой факт уже есть — обновил'); setDraft(''); load() }
+    try { const f = await memoryApi.add(draft.trim(), kind); notify(f.new ? 'Запомнено' : 'Такой факт уже есть — обновил'); setDraft(''); load() }
     catch (e) { err(e) } finally { setBusy(false) }
   }
   const save = async (f: Fact) => {
@@ -89,7 +89,7 @@ export function MemoryPanel() {
             <div className="divide-y divide-line">
               {shown.map(f => (
                 <div key={f.id} className="group flex items-start gap-3 py-2.5">
-                  <Badge className="mt-0.5 shrink-0">{KIND[f.kind]}</Badge>
+                  <span className="mt-0.5 shrink-0"><Badge>{KIND[f.kind]}</Badge></span>
                   {edit?.id === f.id ? (
                     <div className="flex flex-1 gap-1.5">
                       <Input icon={null} autoFocus value={edit.text} maxLength={300} onChange={e => setEdit({ id: f.id, text: e.target.value })}

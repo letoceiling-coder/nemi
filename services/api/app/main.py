@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from . import storage
 from .auth import current_user, hash_password, make_token, verify_password
 from .config import settings
-from . import memory
+from . import logs, memory
 from .db import AuditLog, Conversation, MemoryFact, Message, SessionLocal, User, audit, init_db, now
 from .providers import ModelRouter, ProviderError
 from .secrets import KNOWN, delete_secret, secrets_status, set_secret
@@ -32,7 +32,9 @@ _fails: dict[str, list[float]] = {}
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    logs.setup_logging()
     init_db()
+    log.info("backend %s started, data_dir=%s", app.version, settings.data_dir)
     yield
 
 
@@ -136,6 +138,12 @@ def del_secret(name: str, uid: str = Depends(current_user), db: Session = Depend
 def audit_log(uid: str = Depends(current_user), db: Session = Depends(get_db), limit: int = 50):
     rows = db.scalars(select(AuditLog).where(AuditLog.user_id == uid).order_by(AuditLog.at.desc()).limit(min(limit, 200)))
     return [{"action": r.action, "detail": r.detail, "at": r.at.isoformat()} for r in rows]
+
+
+@app.get("/api/v1/system/logs")
+def system_logs(lines: int = 200, level: str = "", uid: str = Depends(current_user)):
+    """Tail of the app log for Settings → Diagnostics. Contents are redacted on write and hold no message bodies."""
+    return {"file": str(logs.LOG_FILE), "lines": logs.tail(lines, level.upper())}
 
 
 # ---------- models ----------
@@ -244,10 +252,13 @@ async def chat(b: ChatIn, uid: str = Depends(current_user)):
             if kind == "meta":
                 meta = val
                 yield ev({"type": "meta", **val})
+                if val.get("fallback"):
+                    log.warning("chat fallback to %s/%s, skipped: %s", val["provider"], val["model"], "; ".join(val.get("skipped", [])))
             elif kind == "delta":
                 text.append(val)
                 yield ev({"type": "delta", "text": val})
             else:
+                log.error("chat failed: %s", val)
                 yield ev({"type": "error", "message": val})
         if text:
             with SessionLocal() as db:
@@ -306,7 +317,7 @@ async def memory_add(b: FactIn, uid: str = Depends(current_user), db: Session = 
         raise HTTPException(422, "Пароли, ключи и номера документов в память не сохраняются")
     f, created = await memory.add_fact(db, router_models, uid, b.text.strip(), b.kind, "manual")
     audit(db, uid, "memory.add" if created else "memory.refresh", f.id)
-    return {**_fact_out(f), "created": created}
+    return {**_fact_out(f), "new": created}
 
 
 @app.patch("/api/v1/memory/{fid}")
