@@ -10,7 +10,7 @@ class Fake(ModelProvider):
     def configured(self): return self.key
     async def list_models(self): return ["m"]
 
-    async def stream_chat(self, messages, model, temperature):
+    async def stream_chat(self, messages, model, temperature, kind="chat"):
         self.last_model = model or "m"
         if not self.ok:
             raise ProviderError(f"{self.name}: HTTP 503")
@@ -66,7 +66,7 @@ def test_role_chain_falls_through_and_private_is_own_server_only(monkeypatch):
     monkeypatch.setitem(providers.settings.role_models, "main", ["bad", "good"])
 
     class P(Fake):
-        async def stream_chat(self, messages, model, temperature):
+        async def stream_chat(self, messages, model, temperature, kind="chat"):
             self.last_model = model
             if model == "bad":
                 raise ProviderError("403")

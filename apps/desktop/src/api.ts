@@ -16,8 +16,11 @@ export type ChatEvent =
   | { type: 'recall'; count: number }
   | { type: 'answered' }
   | { type: 'memory'; added: string[] }
+  | ({ type: 'budget' } & Budget)
   | { type: 'error'; message: string }
   | { type: 'done' }
+
+export interface Budget { limit: number; spent: number; ratio: number; level: 'ok' | 'warn' | 'stop'; month: string }
 
 export const getToken = () => sessionStorage.getItem('pai_token') || ''
 export const getUser = (): User | null => { try { return JSON.parse(sessionStorage.getItem('pai_user_obj') || 'null') } catch { return null } }
@@ -51,6 +54,8 @@ export const api = {
   putSecret: (name: string, value: string) => req<{ ok: boolean }>(`/system/secrets/${name}`, { method: 'PUT', body: JSON.stringify({ value }) }),
   audit: () => req<{ action: string; detail: string; at: string }[]>('/system/audit'),
   logs: (lines = 200, level = '') => req<{ file: string; lines: string[] }>(`/system/logs?lines=${lines}${level ? `&level=${level}` : ''}`),
+  budget: () => req<Budget>('/system/budget'),
+  setBudget: (limit: number) => req<Budget>('/system/budget', { method: 'PUT', body: JSON.stringify({ limit }) }),
   conversations: () => req<Conv[]>('/assistant/conversations'),
   conversation: (id: string) => req<{ id: string; title: string; messages: { role: 'user' | 'assistant'; content: string; provider?: string; model?: string }[] }>(`/assistant/conversations/${id}`),
   renameConversation: (id: string, title: string) => req<{ ok: boolean }>(`/assistant/conversations/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) }),

@@ -3,7 +3,7 @@ import clsx from 'clsx'
 import { ArrowUp, Paperclip, Mic, Square, ChevronDown, Copy, RotateCw, Check, Loader2, AlertCircle, Circle, Sparkles, Pencil, X, ChevronRight, ShieldCheck, Globe, FileText, FileSpreadsheet, File as FileIcon, Mail, CalendarCheck, BarChart3, FolderKanban, Mic as MicI, UploadCloud, Brain } from 'lucide-react'
 import { useApp, Msg, Step, Att } from '../store'
 import { BrowserView } from '../components/BrowserView'
-import { api, chatStream, getPref, setPref, ProviderModels, getAutoMemory } from '../api'
+import { api, chatStream, getPref, setPref, ProviderModels, getAutoMemory, Budget } from '../api'
 import { IconButton, Button, Badge } from '../ui'
 
 const fmtSize = (n: number) => n > 1048576 ? (n / 1048576).toFixed(1) + ' МБ' : Math.max(1, Math.round(n / 1024)) + ' КБ'
@@ -71,6 +71,16 @@ function Rich({ text }: { text: string }) {
       })}
     </div>
   )
+}
+
+/** Warn about the OpenRouter limit once per level per app session, not on every message */
+let budgetShown = ''
+function budgetNotice(b: Budget, notify: (t: string) => void) {
+  if (budgetShown === b.level + b.month) return
+  budgetShown = b.level + b.month
+  notify(b.level === 'stop'
+    ? `Месячный лимит OpenRouter ${b.limit} исчерпан — отвечает только ваш сервер. Лимит: Настройки → Модели AI`
+    : `Израсходовано ${Math.round(b.ratio * 100)} % месячного лимита OpenRouter (${b.spent.toFixed(2)} из ${b.limit})`)
 }
 
 const cards = [
@@ -144,6 +154,7 @@ export default function ChatPage() {
     for await (const ev of chatStream({ message: q, conversation_id: useApp.getState().convId, model: pref.model, prefer: pref.provider, remember: getAutoMemory() }, ac.signal)) {
       // memory arrives after the answer; it belongs to this message even if the user already sent the next one
       if (ev.type === 'memory') { patch(id, m => ({ ...m, memory: ev.added })); continue }
+      if (ev.type === 'budget') { budgetNotice(ev, notify); continue }
       if (run.current !== my) continue
       if (ev.type === 'conversation') { useApp.getState().setConvId(ev.id); useApp.getState().loadConvs() }
       else if (ev.type === 'recall') recalled = ev.count

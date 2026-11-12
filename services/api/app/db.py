@@ -1,7 +1,7 @@
 from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import ForeignKey, String, Text, create_engine, event
+from sqlalchemy import Float, ForeignKey, String, Text, create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 from .config import settings
 
@@ -72,6 +72,24 @@ class MemoryFact(Base):
     embedding: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list[float]; None if embeddings unavailable
     created: Mapped[datetime] = mapped_column(default=now)
     updated: Mapped[datetime] = mapped_column(default=now)
+
+
+class SpendEntry(Base):
+    """Cost of each paid cloud call (USD as reported by OpenRouter). No message content."""
+    __tablename__ = "spend_ledger"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=uid)
+    provider: Mapped[str] = mapped_column(String(40))
+    model: Mapped[str] = mapped_column(String(120))
+    kind: Mapped[str] = mapped_column(String(20))          # chat | role | embed
+    cost: Mapped[float] = mapped_column(Float)
+    at: Mapped[datetime] = mapped_column(default=now, index=True)
+
+
+class AppSetting(Base):
+    """App-wide (not per-user) settings, e.g. the OpenRouter monthly limit: the key is shared by all accounts."""
+    __tablename__ = "app_settings"
+    key: Mapped[str] = mapped_column(String(80), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
 
 
 class AuditLog(Base):

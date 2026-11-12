@@ -5,6 +5,7 @@ import json
 from abc import ABC, abstractmethod
 from typing import AsyncIterator
 import httpx
+from . import budget
 from .config import settings
 from .secrets import get_secret
 
@@ -30,9 +31,18 @@ class ModelProvider(ABC):
 class OpenAICompatProvider(ModelProvider):
     """Any OpenAI-compatible /v1 API (own server, OpenRouter, ...)."""
 
-    def __init__(self, name: str, base_url: str, secret_name: str, default_model: str, extra_headers: dict | None = None):
+    def __init__(self, name: str, base_url: str, secret_name: str, default_model: str, extra_headers: dict | None = None,
+                 paid: bool = False):
         self.name, self.base_url, self.secret_name = name, base_url.rstrip("/"), secret_name
         self.default_model, self.extra = default_model, extra_headers or {}
+        self.paid = paid   # paid per call -> monthly limit is enforced and every call's cost goes to the ledger
+
+    async def _guard(self) -> None:
+        if self.paid:
+            try:
+                await budget.check()
+            except budget.BudgetExceeded as e:
+                raise ProviderError(f"{self.name}: {e}") from e
 
     def configured(self) -> bool:
         return bool(get_secret(self.secret_name))
@@ -58,18 +68,22 @@ class OpenAICompatProvider(ModelProvider):
     async def embed(self, texts: list[str], model: str) -> list[list[float]]:
         if not self.configured():
             raise ProviderError(f"{self.name}: нет ключа")
+        await self._guard()
         try:
             async with httpx.AsyncClient(timeout=self._timeout()) as c:
                 r = await c.post(f"{self.base_url}/embeddings", json={"model": model, "input": texts}, headers=self._headers())
             if r.status_code != 200:
                 raise ProviderError(f"{self.name}: HTTP {r.status_code}")
+            if self.paid:
+                budget.record(model, float((r.json().get("usage") or {}).get("cost") or 0), "embed")
             return [d["embedding"] for d in sorted(r.json()["data"], key=lambda d: d["index"])]
         except httpx.HTTPError as e:
             raise ProviderError(f"{self.name}: {type(e).__name__}") from e
 
-    async def stream_chat(self, messages, model, temperature=0.7):
+    async def stream_chat(self, messages, model, temperature=0.7, kind: str = "chat"):
         if not self.configured():
             raise ProviderError(f"{self.name}: нет ключа")
+        await self._guard()
         model = model or self.default_model
         if not model:  # own server: pick the first available model
             ms = await self.list_models()
@@ -78,6 +92,9 @@ class OpenAICompatProvider(ModelProvider):
             model = ms[0]
         self.last_model = model
         body = {"model": model, "messages": messages, "stream": True, "temperature": temperature}
+        if self.paid:
+            body["usage"] = {"include": True}   # OpenRouter adds the exact cost to the final chunk
+        cost = 0.0
         try:
             async with httpx.AsyncClient(timeout=self._timeout()) as c:
                 async with c.stream("POST", f"{self.base_url}/chat/completions", json=body, headers=self._headers()) as r:
@@ -92,8 +109,12 @@ class OpenAICompatProvider(ModelProvider):
                         if data == "[DONE]":
                             break
                         try:
-                            delta = json.loads(data)["choices"][0].get("delta", {}).get("content")
-                        except (KeyError, IndexError, json.JSONDecodeError):
+                            obj = json.loads(data)
+                            if isinstance(obj.get("usage"), dict):
+                                cost = float(obj["usage"].get("cost") or 0)
+                            ch = obj.get("choices") or [{}]
+                            delta = ch[0].get("delta", {}).get("content")
+                        except (KeyError, IndexError, TypeError, ValueError):
                             continue
                         if delta:
                             got = True
@@ -102,13 +123,16 @@ class OpenAICompatProvider(ModelProvider):
                         raise ProviderError(f"{self.name}: пустой ответ")
         except httpx.HTTPError as e:
             raise ProviderError(f"{self.name}: {type(e).__name__}") from e
+        finally:
+            if self.paid:   # also on cancel / mid-stream break: whatever was billed is recorded
+                budget.record(model, cost, kind)
 
 
 def build_providers() -> list[ModelProvider]:
     return [
         OpenAICompatProvider("siteaccess", settings.siteaccess_base_url, "siteaccess_api_key", settings.siteaccess_default_model),
         OpenAICompatProvider("openrouter", settings.openrouter_base_url, "openrouter_api_key", settings.openrouter_default_model,
-                             {"X-Title": "Personal AI Assistant"}),
+                             {"X-Title": "Personal AI Assistant"}, paid=True),
     ]
 
 
@@ -162,7 +186,7 @@ class ModelRouter:
         errors = []
         for model in settings.role_models[role]:
             try:
-                text = "".join([c async for c in p.stream_chat(messages, model, temperature)])
+                text = "".join([c async for c in p.stream_chat(messages, model, temperature, "role")])
                 return text, {"provider": p.name, "model": model, "role": role}
             except ProviderError as e:
                 errors.append(f"{model}: {e}")

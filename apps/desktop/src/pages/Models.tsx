@@ -3,6 +3,7 @@ import { Download, Loader2, Star } from 'lucide-react'
 import { models, agents } from '../data'
 import { Page, PageHeader, Card, Badge, Button, Section, Progress } from '../ui'
 import { useApp } from '../store'
+import { BudgetCard } from './Budget'
 
 export function ModelsPage() {
   const { notify } = useApp()
@@ -34,7 +35,7 @@ export function ModelsPage() {
           </div>
         </Section>
         <Section title="Облачные модели · OpenRouter" right={<Button size="sm" onClick={() => useApp.getState().go('integrations')}>Настроить ключ</Button>}>
-          <Card className="flex items-center gap-3"><div className="min-w-0 flex-1"><div className="font-medium">OpenRouter не подключён</div><div className="text-[12.5px] text-fg3">Добавьте API-ключ в «Интеграции», чтобы выбирать облачные модели (Claude, GPT, Gemini, Qwen) для отдельных агентов и ролей.</div></div><Badge>Выключено</Badge></Card>
+          <BudgetCard />
         </Section>
         <div className="grid grid-cols-2 gap-5">
           <Section title="Параметры генерации"><Card className="space-y-4">

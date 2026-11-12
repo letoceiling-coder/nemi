@@ -34,6 +34,7 @@ class Settings(BaseSettings):
         # final reports, hard analysis (rare) — 0.10/0.50, 1M context
         "deep": ["anthropic/claude-haiku-5.5", "moonshotai/kimi-k2.5", "deepseek/deepseek-v3.2"],
     }
+    openrouter_monthly_limit: float = 10.0   # USD; default, changeable in Settings (0 = no limit)
     embedding_model: str = "baai/bge-m3"    # multilingual, 8k context
     request_timeout: float = 60.0
     connect_timeout: float = 6.0

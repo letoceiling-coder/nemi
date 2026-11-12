@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from . import storage
 from .auth import current_user, hash_password, make_token, verify_password
 from .config import settings
-from . import logs, memory
+from . import budget, logs, memory
 from .db import AuditLog, Conversation, MemoryFact, Message, SessionLocal, User, audit, init_db, now
 from .providers import ModelRouter, ProviderError
 from .secrets import KNOWN, delete_secret, secrets_status, set_secret
@@ -146,6 +146,24 @@ def system_logs(lines: int = 200, level: str = "", uid: str = Depends(current_us
     return {"file": str(logs.LOG_FILE), "lines": logs.tail(lines, level.upper())}
 
 
+class BudgetIn(BaseModel):
+    limit: float = Field(ge=0, le=10000)   # USD per calendar month (UTC); 0 = no limit
+
+
+@app.get("/api/v1/system/budget")
+async def budget_get(uid: str = Depends(current_user)):
+    await budget.refresh_remote(force=True)
+    return budget.status()
+
+
+@app.put("/api/v1/system/budget")
+def budget_put(b: BudgetIn, uid: str = Depends(current_user), db: Session = Depends(get_db)):
+    budget.set_limit(round(b.limit, 2))
+    audit(db, uid, "budget.limit", f"{b.limit:g} USD")
+    log.info("OpenRouter monthly limit set to %s USD", b.limit)
+    return budget.status()
+
+
 # ---------- models ----------
 @app.get("/api/v1/models")
 async def models(uid: str = Depends(current_user)):
@@ -247,7 +265,7 @@ async def chat(b: ChatIn, uid: str = Depends(current_user)):
         yield ev({"type": "conversation", "id": cid})
         if facts:
             yield ev({"type": "recall", "count": len(facts)})
-        text, meta = [], {}
+        text, meta, failed = [], {}, ""
         async for kind, val in router_models.stream(messages, b.model, b.prefer):
             if kind == "meta":
                 meta = val
@@ -259,7 +277,13 @@ async def chat(b: ChatIn, uid: str = Depends(current_user)):
                 yield ev({"type": "delta", "text": val})
             else:
                 log.error("chat failed: %s", val)
+                failed = val
                 yield ev({"type": "error", "message": val})
+        # the cloud was used or refused because of the limit -> tell the UI how close the month is to the cap
+        if meta.get("provider") == "openrouter" or "лимит" in failed or any("лимит" in x for x in meta.get("skipped", [])):
+            st = budget.status()
+            if st["level"] != "ok":
+                yield ev({"type": "budget", **st})
         if text:
             with SessionLocal() as db:
                 db.add(Message(conv_id=cid, user_id=uid, role="assistant", content="".join(text), provider=meta.get("provider"), model=meta.get("model")))
