@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NEMI — персональный AI-ассистент для Windows</title>
+<meta name="description" content="Один ассистент вместо десятка вкладок: почта, задачи, проекты, встречи и браузер. Ваши данные — только у вас.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#17171a;--surface:#1d1d21;--surface2:#232328;--surface3:#2b2b31;--line:#2e2e35;--text:#ececef;--text2:#a6a6b0;--text3:#70707b;--accent:#d98a5f;--accent-fg:#1a120d;--accent-soft:rgba(217,138,95,.14);--ok:#5fb98a;--warn:#e2b04e;--info:#6aa0e8}
+*{box-sizing:border-box;margin:0}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font:16px/1.6 Inter,system-ui,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+.wrap{max-width:1120px;margin:0 auto;padding:0 20px}
+.btn{display:inline-flex;align-items:center;gap:8px;height:46px;padding:0 22px;border-radius:12px;font-weight:600;font-size:15px;border:1px solid transparent;cursor:pointer;transition:.15s}
+.btn.primary{background:var(--accent);color:var(--accent-fg)}.btn.primary:hover{filter:brightness(1.1)}
+.btn.ghost{background:var(--surface2);color:var(--text)}.btn.ghost:hover{background:var(--surface3)}
+.btn[aria-disabled=true]{opacity:.55;cursor:not-allowed}
+nav{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 85%,transparent);backdrop-filter:blur(12px)}
+nav .wrap{display:flex;align-items:center;height:64px;gap:28px}
+.logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px}
+.logo i{display:grid;place-items:center;width:30px;height:30px;border-radius:9px;background:var(--accent);color:var(--accent-fg);font-style:normal;font-size:15px}
+nav .links{display:flex;gap:22px;color:var(--text2);font-size:14.5px;margin-left:12px}nav .links a:hover{color:var(--text)}
+nav .sp{flex:1}
+.hero{padding:72px 0 40px;text-align:center}
+.pill{display:inline-flex;gap:8px;align-items:center;padding:6px 14px;border-radius:99px;background:var(--accent-soft);color:var(--accent);font-size:13px;font-weight:500}
+h1{font-size:clamp(34px,5.6vw,60px);line-height:1.08;letter-spacing:-.03em;font-weight:700;margin:20px auto 18px;max-width:860px}
+h1 em{font-style:normal;color:var(--accent)}
+.lead{max-width:640px;margin:0 auto 30px;color:var(--text2);font-size:18px}
+.cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.note{margin-top:14px;color:var(--text3);font-size:13px}
+/* app mock */
+.mock{margin:56px auto 0;max-width:1000px;border-radius:18px;background:var(--surface);border:1px solid var(--line);box-shadow:0 40px 120px rgba(0,0,0,.55);overflow:hidden;text-align:left}
+.mock .bar{display:flex;gap:7px;padding:12px 16px;background:var(--surface2)}.mock .bar b{width:11px;height:11px;border-radius:50%;background:var(--surface3)}
+.mock .body{display:grid;grid-template-columns:200px 1fr 220px;height:430px}
+.m-side{background:var(--surface);padding:14px 10px;border-right:1px solid var(--line);font-size:13px;color:var(--text2)}
+.m-side div{padding:7px 10px;border-radius:8px}.m-side .on{background:var(--surface2);color:var(--text)}
+.m-side .new{border:1px solid var(--line);margin-bottom:10px;color:var(--text)}
+.m-chat{display:flex;flex-direction:column;padding:18px 22px;gap:12px;overflow:hidden;background:var(--bg)}
+.m-right{padding:16px;border-left:1px solid var(--line);font-size:12.5px;color:var(--text2)}
+.m-right h6{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--text3);margin:0 0 8px;font-weight:500}.m-right p{margin:0 0 14px}
+.u{align-self:flex-end;background:var(--surface2);padding:9px 14px;border-radius:14px;font-size:14px;max-width:80%}
+.a{font-size:14px;color:var(--text);max-width:92%}
+.steps{border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:8px;font-size:12.5px;color:var(--text2);background:var(--surface)}
+.steps div{display:flex;gap:8px;padding:2px 0}.steps .d{color:var(--ok)}.steps .r{color:var(--accent)}
+.cursor{display:inline-block;width:7px;height:15px;background:var(--accent);vertical-align:-2px;animation:bl 1s steps(2) infinite}@keyframes bl{50%{opacity:0}}
+.m-input{margin-top:auto;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px 14px;color:var(--text3);font-size:14px}
+/* sections */
+section{padding:84px 0}
+.eyebrow{color:var(--accent);font-size:13px;font-weight:600;letter-spacing:.08em;text-transform:uppercase}
+h2{font-size:clamp(28px,4vw,42px);line-height:1.15;letter-spacing:-.025em;margin:10px 0 14px;font-weight:700}
+.sub{color:var(--text2);max-width:640px;font-size:17px}
+.center{text-align:center}.center .sub{margin:0 auto}
+.steps3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:40px}
+.card{background:var(--surface);border-radius:16px;padding:24px;border:1px solid transparent;transition:.2s}.card:hover{border-color:var(--line);background:var(--surface2)}
+.num{width:34px;height:34px;border-radius:10px;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;font-weight:700;margin-bottom:14px}
+.card h3{font-size:18px;margin-bottom:6px}.card p{color:var(--text2);font-size:15px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:40px}
+.ico{font-size:24px;margin-bottom:10px}
+.tag{display:inline-block;font-size:11.5px;font-weight:600;padding:2px 9px;border-radius:99px;margin-bottom:10px}
+.tag.ok{background:rgba(95,185,138,.15);color:var(--ok)}.tag.soon{background:rgba(226,176,78,.15);color:var(--warn)}
+/* demo */
+.demo{display:grid;grid-template-columns:1.1fr 1fr;gap:40px;align-items:center}
+.player{background:var(--surface);border-radius:18px;border:1px solid var(--line);overflow:hidden}
+.player .screen{height:340px;padding:20px;display:flex;flex-direction:column;gap:12px;background:var(--bg)}
+.ctrl{display:flex;align-items:center;gap:14px;padding:12px 16px;background:var(--surface2)}
+.ctrl button{width:34px;height:34px;border-radius:50%;border:0;background:var(--accent);color:var(--accent-fg);cursor:pointer;font-size:13px}
+.prog{flex:1;height:5px;border-radius:9px;background:var(--surface3);overflow:hidden}.prog i{display:block;height:100%;width:0;background:var(--accent)}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:22px 0 0}
+.tabs button{border:1px solid var(--line);background:transparent;color:var(--text2);padding:8px 14px;border-radius:99px;cursor:pointer;font:inherit;font-size:14px}.tabs button.on{background:var(--accent-soft);color:var(--accent);border-color:transparent}
+/* compare */
+.cmp{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:40px}
+.cmp ul{list-style:none;padding:0;margin-top:14px}.cmp li{padding:8px 0;color:var(--text2);display:flex;gap:10px}.cmp .no li:before{content:"✕";color:#e0685f}.cmp .yes li:before{content:"✓";color:var(--ok)}
+.sec{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:36px}
+.sec .card{padding:20px}.sec h3{font-size:16px}
+.price{grid-template-columns:repeat(3,1fr)}.price .big{font-size:26px;font-weight:700;margin:8px 0}
+.price .card.hl{border-color:var(--accent);background:var(--surface2)}
+.price ul{list-style:none;padding:0;margin:14px 0 20px;color:var(--text2);font-size:14.5px}.price li{padding:4px 0}.price li:before{content:"✓ ";color:var(--ok)}
+details{background:var(--surface);border-radius:14px;padding:16px 20px;margin-bottom:10px}summary{cursor:pointer;font-weight:600;list-style:none}details p{color:var(--text2);margin-top:10px;font-size:15px}
+.final{text-align:center;background:linear-gradient(180deg,var(--surface),var(--bg));border-radius:28px;padding:64px 20px}
+footer{padding:40px 0;color:var(--text3);font-size:14px}footer .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px}
+@media(max-width:860px){nav .links{display:none}.mock .body{grid-template-columns:1fr}.m-side,.m-right{display:none}.steps3,.grid,.price,.sec{grid-template-columns:1fr}.demo,.cmp{grid-template-columns:1fr}section{padding:60px 0}}
+@media(max-width:560px){nav .ghost{display:none}.hero{padding-top:44px}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<nav><div class="wrap">
+  <a class="logo" href="#"><i>N</i>NEMI</a>
+  <div class="links"><a href="#how">Как работает</a><a href="#features">Возможности</a><a href="#demo">Демо</a><a href="#privacy">Безопасность</a><a href="#pricing">Тарифы</a></div>
+  <div class="sp"></div>
+  <a class="btn ghost js-cabinet" href="#" style="height:38px">Личный кабинет</a>
+  <a class="btn primary js-download" href="#download" style="height:38px">Скачать</a>
+</div></nav>
+
+<header class="hero"><div class="wrap">
+  <span class="pill">● Для Windows 10/11 · ранний доступ</span>
+  <h1>Один ассистент вместо <em>десятка вкладок</em></h1>
+  <p class="lead">Скажите, что нужно сделать, обычными словами. NEMI проверит почту, разберёт задачи и проекты, запишет встречу и подготовит отчёт — а отправит что-либо только с вашего подтверждения.</p>
+  <div class="cta">
+    <a class="btn primary js-download" href="#download">Скачать для Windows</a>
+    <a class="btn ghost" href="#demo">▶ Смотреть в действии</a>
+  </div>
+  <p class="note">Ваши данные хранятся у вас · Ключи — в защищённом хранилище Windows</p>
+
+  <div class="mock" aria-label="Интерфейс приложения">
+    <div class="bar"><b></b><b></b><b></b></div>
+    <div class="body">
+      <div class="m-side"><div class="new">＋ Новый диалог</div><div class="on">Ассистент</div><div>Проекты</div><div>Задачи</div><div>Календарь</div><div>Встречи</div><div>Почта</div><div>Автоматизации</div><div>База знаний</div><div>Отчёты</div></div>
+      <div class="m-chat" id="heroChat"></div>
+      <div class="m-right"><h6>Текущие задачи</h6><p>○ Проверить договор<br><span style="color:var(--text3)">Сегодня, 11:00</span></p><p>○ Ответить Ивану по смете<br><span style="color:var(--text3)">Сегодня, 15:00</span></p><h6>Ближайшие встречи</h6><p>🎙 Планёрка по CRM<br><span style="color:var(--text3)">Сегодня, 10:00</span></p><h6>Фоновые задачи</h6><p>Расшифровка встречи — 64%</p></div>
+    </div>
+  </div>
+</div></header>
+
+<section id="how"><div class="wrap center">
+  <div class="eyebrow">Как это работает</div>
+  <h2>Три шага вместо рутины</h2>
+  <p class="sub">Не нужно учить команды и настраивать сценарии. Пишите как человеку.</p>
+  <div class="steps3" style="text-align:left">
+    <div class="card"><div class="num">1</div><h3>Поставьте задачу</h3><p>«Проверь почту и подготовь ответы клиентам». Можно текстом, голосом или приложить файл.</p></div>
+    <div class="card"><div class="num">2</div><h3>Следите за ходом</h3><p>Ассистент показывает понятный план: что делает сейчас, что уже готово и где нужна ваша помощь.</p></div>
+    <div class="card"><div class="num">3</div><h3>Подтвердите результат</h3><p>Письма, публикации и другие внешние действия выполняются только после вашего «да».</p></div>
+  </div>
+</div></section>
+
+<section id="features" style="background:var(--surface)"><div class="wrap">
+  <div class="eyebrow">Возможности</div>
+  <h2>Всё рабочее — в одном месте</h2>
+  <p class="sub">Мы честно отмечаем, что уже работает, а что готовится.</p>
+  <div class="grid">
+    <div class="card" style="background:var(--bg)"><span class="tag ok">Работает</span><div class="ico">💬</div><h3>Диалог с ассистентом</h3><p>Ответы в реальном времени, история, вложения, Markdown и код. Если основная модель занята — автоматически подключается резервная.</p></div>
+    <div class="card" style="background:var(--bg)"><span class="tag ok">Работает</span><div class="ico">🔐</div><h3>Аккаунты и изоляция</h3><p>Несколько аккаунтов на одном компьютере, данные каждого полностью изолированы.</p></div>
+    <div class="card" style="background:var(--bg)"><span class="tag ok">Работает</span><div class="ico">☁️</div><h3>Приватное хранилище</h3><p>Файлы — в вашем приватном бакете S3 с проверкой целостности и временными ссылками.</p></div>
+    <div class="card" style="background:var(--bg)"><span class="tag soon">В разработке</span><div class="ico">✉️</div><h3>Почта и мессенджеры</h3><p>Найдёт письма, где ждут ответа, подготовит черновики и напомнит о сроках.</p></div>
+    <div class="card" style="background:var(--bg)"><span class="tag soon">В разработке</span><div class="ico">🎙</div><h3>Встречи и протоколы</h3><p>Запись, расшифровка по говорящим, решения и задачи — без ручного конспекта.</p></div>
+    <div class="card" style="background:var(--bg)"><span class="tag soon">В разработке</span><div class="ico">🗂</div><h3>Проекты и задачи</h3><p>Журнал решений, дедлайны, напоминания. Ассистент помнит, что и когда вы решили.</p></div>
+    <div class="card" style="background:var(--bg)"><span class="tag soon">В разработке</span><div class="ico">🌐</div><h3>Встроенный браузер</h3><p>Ассистент ищет и собирает данные у вас на глазах, а вы в любой момент перехватываете управление.</p></div>
+    <div class="card" style="background:var(--bg)"><span class="tag soon">В разработке</span><div class="ico">⚙️</div><h3>Автоматизации</h3><p>«Каждое утро показывай важные письма» — и это происходит само.</p></div>
+    <div class="card" style="background:var(--bg)"><span class="tag soon">В разработке</span><div class="ico">📊</div><h3>Отчёты</h3><p>За день, неделю или проект — в PDF, DOCX, XLSX.</p></div>
+  </div>
+</div></section>
+
+<section id="demo"><div class="wrap demo">
+  <div>
+    <div class="eyebrow">Демонстрация</div>
+    <h2>Посмотрите, как это выглядит</h2>
+    <p class="sub">Интерактивный показ интерфейса. Выберите сценарий — ассистент покажет ход работы.</p>
+    <div class="tabs" id="tabs"></div>
+    <p class="note" style="margin-top:18px">Это иллюстрация интерфейса. Полноценное видео-обзор добавим к релизу.</p>
+  </div>
+  <div class="player">
+    <div class="screen" id="demoScreen"></div>
+    <div class="ctrl"><button id="play" aria-label="Пауза / Воспроизведение">❚❚</button><div class="prog"><i id="bar"></i></div><span id="time" style="font-size:12.5px;color:var(--text3);font-family:'JetBrains Mono',monospace">0:00</span></div>
+  </div>
+</div></section>
+
+<section style="background:var(--surface)"><div class="wrap center">
+  <div class="eyebrow">Зачем это нужно</div>
+  <h2>Меньше переключений — больше результата</h2>
+  <div class="cmp" style="text-align:left">
+    <div class="card no" style="background:var(--bg)"><h3>Как обычно</h3><ul><li>Почта, мессенджеры, таблицы и заметки — в разных окнах</li><li>Договорённости теряются в переписке</li><li>Протоколы встреч пишутся вручную</li><li>Каждый отчёт собирается заново</li></ul></div>
+    <div class="card yes" style="background:var(--bg);border-color:var(--accent)"><h3>С NEMI</h3><ul><li>Одно окно и одна строка для любого поручения</li><li>Решения и обещания сохраняются с источником</li><li>Задачи из встреч и писем создаются сами</li><li>Отчёт за неделю — одной фразой</li></ul></div>
+  </div>
+</div></section>
+
+<section id="privacy"><div class="wrap center">
+  <div class="eyebrow">Безопасность</div>
+  <h2>Вы контролируете каждое действие</h2>
+  <p class="sub">Ассистент работает как помощник, а не как автопилот.</p>
+  <div class="sec" style="text-align:left">
+    <div class="card"><div class="ico">🛡</div><h3>Подтверждение</h3><p>Письма и публикации — только с вашего «да».</p></div>
+    <div class="card"><div class="ico">🗝</div><h3>Ключи под защитой</h3><p>Пароли и токены хранятся в Windows Credential Manager, не в файлах.</p></div>
+    <div class="card"><div class="ico">🏠</div><h3>Данные у вас</h3><p>Локальная база и приватное хранилище. Доступ — только по вашим ключам.</p></div>
+    <div class="card"><div class="ico">⛔</div><h3>Кнопка «Стоп»</h3><p>Мгновенная остановка всех агентов и журнал действий.</p></div>
+  </div>
+</div></section>
+
+<section id="pricing" style="background:var(--surface)"><div class="wrap center">
+  <div class="eyebrow">Тарифы</div>
+  <h2>Начните бесплатно</h2>
+  <p class="sub">Условия и цены объявим к релизу. Ниже — как будет устроено.</p>
+  <div class="grid price" style="text-align:left">
+    <div class="card" style="background:var(--bg)"><h3>Старт</h3><div class="big">Бесплатно</div><ul><li>Диалог с ассистентом</li><li>Один аккаунт</li><li>Свои API-ключи</li></ul><a class="btn ghost js-download" href="#download" style="width:100%;justify-content:center">Скачать</a></div>
+    <div class="card hl" style="background:var(--bg)"><span class="tag soon">Скоро</span><h3>Про</h3><div class="big">Цена уточняется</div><ul><li>Все агенты и автоматизации</li><li>Встречи и протоколы</li><li>Облачные модели включены</li></ul><a class="btn primary js-cabinet" href="#" style="width:100%;justify-content:center">Оплата в кабинете</a></div>
+    <div class="card" style="background:var(--bg)"><h3>Команда</h3><div class="big">По запросу</div><ul><li>Несколько пользователей</li><li>Общие проекты и база знаний</li><li>Администрирование</li></ul><a class="btn ghost" href="#faq" style="width:100%;justify-content:center">Узнать больше</a></div>
+  </div>
+</div></section>
+
+<section id="faq"><div class="wrap" style="max-width:760px">
+  <h2 class="center">Частые вопросы</h2><div style="margin-top:30px">
+  <details><summary>Какие системы поддерживаются?</summary><p>Сейчас — Windows 10/11 (x64). Версия для macOS и мобильное приложение-компаньон для iPhone и Android запланированы после стабилизации Windows-версии.</p></details>
+  <details><summary>Нужно ли что-то устанавливать отдельно?</summary><p>Нет. Установщик содержит всё необходимое. Модели работают через подключённые серверы — локальная установка Ollama не требуется.</p></details>
+  <details><summary>Куда уходят мои данные?</summary><p>История и настройки хранятся локально, файлы — в вашем приватном хранилище. Для ответов используются модели на сервере; для чувствительных документов будет режим «только свой сервер».</p></details>
+  <details><summary>Может ли ассистент отправить письмо без меня?</summary><p>Только если вы сами включите такое правило. По умолчанию каждая отправка требует подтверждения.</p></details>
+  </div>
+</div></section>
+
+<section id="download" style="padding-top:0"><div class="wrap"><div class="final">
+  <h2>Попробуйте NEMI</h2>
+  <p class="sub" style="margin:0 auto 26px">Установщик для Windows и личный кабинет для оплаты появятся с первым релизом.</p>
+  <div class="cta"><a class="btn primary js-download" href="#download">Скачать для Windows</a><a class="btn ghost js-cabinet" href="#">Личный кабинет</a></div>
+</div></div></section>
+
+<footer><div class="wrap"><span>© <span id="y"></span> NEMI · bro-services.ru</span><span>Сделано для тех, кто ценит своё время</span></div></footer>
+
+<script>
+// Подставьте реальные ссылки, когда они появятся. Пока пусто — кнопки честно показывают «Скоро».
+const LINKS = { download: '', cabinet: '' };
+document.querySelectorAll('.js-download,.js-cabinet').forEach(a => {
+  const url = a.classList.contains('js-download') ? LINKS.download : LINKS.cabinet;
+  if (url) { a.href = url; return; }
+  a.setAttribute('aria-disabled', 'true'); a.title = 'Скоро';
+  a.addEventListener('click', e => { if (a.classList.contains('js-cabinet')) e.preventDefault(); });
+  if (a.classList.contains('js-cabinet')) a.textContent += ' · скоро';
+});
+document.getElementById('y').textContent = new Date().getFullYear();
+
+const SCENES = {
+  'Почта': { q: 'Проверь почту и подготовь ответы', steps: ['Анализирую запрос', 'Проверяю почту', 'Определяю важные письма', 'Готовлю ответы'], a: 'Нашёл 6 писем, 3 ждут ответа: смета (Иван), жалоба на форму (Дмитрий), формат выгрузки (Мария). Черновики готовы — отправить Ивану?' },
+  'Встреча': { q: 'Составь протокол последней встречи', steps: ['Открываю запись', 'Расшифровываю речь', 'Выделяю решения', 'Создаю задачи'], a: 'Решили: PostgreSQL вместо MySQL; релиз модуля до 20 декабря. Создано 3 задачи с ответственными.' },
+  'Отчёт': { q: 'Подготовь отчёт за неделю', steps: ['Собираю задачи', 'Анализирую проекты', 'Формирую отчёт'], a: 'Готово: 24 задачи выполнено, 2 просрочены, 3 решения. Отчёт доступен в PDF, DOCX и XLSX.' },
+};
+const el = (h) => { const d = document.createElement('div'); d.innerHTML = h; return d.firstElementChild; };
+let timers = [], paused = false, scene = 'Почта', t0 = 0, total = 0;
+
+function play(target, key, withProgress) {
+  timers.forEach(clearTimeout); timers = []; target.innerHTML = '';
+  const s = SCENES[key]; const T = (fn, ms) => timers.push(setTimeout(fn, ms));
+  const u = el(`<div class="u"></div>`); target.appendChild(u);
+  let i = 0; const typeQ = () => { if (i <= s.q.length) { u.textContent = s.q.slice(0, i++); T(typeQ, 28); } };
+  typeQ();
+  const t1 = s.q.length * 28 + 300;
+  const box = el(`<div class="steps"></div>`);
+  T(() => { target.appendChild(box); }, t1);
+  s.steps.forEach((st, k) => {
+    T(() => { box.innerHTML = s.steps.slice(0, k + 1).map((x, j) => `<div><span class="${j < k ? 'd' : 'r'}">${j < k ? '✓' : '●'}</span>${x}</div>`).join(''); }, t1 + 500 + k * 800);
+  });
+  const t2 = t1 + 500 + s.steps.length * 800;
+  const ans = el(`<div class="a"></div>`);
+  T(() => { box.innerHTML = s.steps.map(x => `<div><span class="d">✓</span>${x}</div>`).join(''); target.appendChild(ans); let n = 0; const ty = () => { if (n <= s.a.length) { ans.innerHTML = s.a.slice(0, n++) + '<span class="cursor"></span>'; T(ty, 14); } else ans.textContent = s.a; }; ty(); }, t2);
+  total = t2 + s.a.length * 14 + 2500;
+  if (withProgress) { t0 = Date.now(); }
+  T(() => play(target, withProgress ? scene : key, withProgress), total);
+}
+// hero: loops all scenes
+const keys = Object.keys(SCENES); let hk = 0; const hero = document.getElementById('heroChat');
+hero.innerHTML = '';
+(function loopHero() { const s = SCENES[keys[hk % 3]]; heroOnce(keys[hk % 3]); hk++; })();
+function heroOnce(k) {
+  const s = SCENES[k]; hero.innerHTML = `<div class="u">${s.q}</div><div class="steps">${s.steps.map(x => `<div><span class="d">✓</span>${x}</div>`).join('')}</div><div class="a">${s.a}</div><div class="m-input">Поставьте задачу обычным языком…</div>`;
+  setTimeout(() => heroOnce(keys[(keys.indexOf(k) + 1) % 3]), 7000);
+}
+// demo player
+const screen = document.getElementById('demoScreen'), tabs = document.getElementById('tabs'), bar = document.getElementById('bar'), time = document.getElementById('time'), pb = document.getElementById('play');
+keys.forEach(k => { const b = document.createElement('button'); b.textContent = k; b.onclick = () => { scene = k; paused = false; pb.textContent = '❚❚'; [...tabs.children].forEach(c => c.classList.toggle('on', c === b)); runDemo(); }; tabs.appendChild(b); });
+tabs.children[0].classList.add('on');
+function runDemo() { timers.forEach(clearTimeout); play(screen, scene, true); }
+pb.onclick = () => { paused = !paused; pb.textContent = paused ? '▶' : '❚❚'; if (paused) { timers.forEach(clearTimeout); timers = []; } else runDemo(); };
+setInterval(() => { if (paused || !total) return; const p = Math.min(1, (Date.now() - t0) / total); bar.style.width = p * 100 + '%'; const s = Math.floor((Date.now() - t0) / 1000); time.textContent = `0:${String(s).padStart(2, '0')}`; }, 200);
+const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting && !total) runDemo(); }), { threshold: .3 }); io.observe(screen);
+</script>
+</body>
+</html>

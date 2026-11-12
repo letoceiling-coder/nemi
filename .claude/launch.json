@@ -1,0 +1,4 @@
+{ "version": "0.0.1", "configurations": [
+  { "name": "desktop", "runtimeExecutable": "npm", "runtimeArgs": ["--prefix", "apps/desktop", "run", "dev"], "port": 5173 },
+  { "name": "landing", "runtimeExecutable": "python", "runtimeArgs": ["-m", "http.server", "5180", "--directory", "apps/landing"], "port": 5180 }
+] }

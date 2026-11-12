@@ -1,0 +1,10 @@
+boto3==1.44.1
+fastapi==0.162.5
+httpx==0.28.1
+keyring==25.7.0
+pydantic==2.14.3
+pydantic-settings==2.16.2
+pytest==9.2.0
+pytest-asyncio==1.4.1.post1
+SQLAlchemy==2.1.8
+uvicorn==0.54.0

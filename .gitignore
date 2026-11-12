@@ -1,0 +1,21 @@
+# secrets — never commit
+.env
+.env.*
+*.pem
+*.key
+secrets/
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+# node / build
+node_modules/
+dist/
+target/
+# local data
+data/
+*.db
+*.sqlite
+
+src-tauri/gen/
