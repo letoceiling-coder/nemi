@@ -18,6 +18,11 @@ export type ChatEvent =
   | { type: 'memory'; added: string[] }
   | ({ type: 'budget' } & Budget)
   | { type: 'error'; message: string }
+  | { type: 'run'; id: string }
+  | { type: 'step'; id: string; label: string; tool: string; status: 'active' | 'done' | 'error' | 'wait'; detail?: string }
+  | { type: 'approval'; id: string; run: string; tool: string; text: string }
+  | { type: 'approval_done'; id: string; result: 'approved' | 'declined' | 'timeout' | 'stopped' }
+  | { type: 'ui'; action: 'open_browser'; url: string }
   | { type: 'done' }
 
 export interface Budget { limit: number; spent: number; ratio: number; level: 'ok' | 'warn' | 'stop'; month: string }
@@ -59,8 +64,10 @@ export const api = {
   modelRoles: () => req<ModelRoles>('/models/roles'),
   modelSettings: () => req<{ private_only: boolean }>('/models/settings'),
   setModelSettings: (private_only: boolean) => req<{ private_only: boolean }>('/models/settings', { method: 'PUT', body: JSON.stringify({ private_only }) }),
+  approve: (run: string, id: string, approve: boolean) => req<{ ok: boolean }>(`/assistant/runs/${run}/approvals/${id}`, { method: 'POST', body: JSON.stringify({ approve }) }),
+  stopAgents: () => req<{ stopped: number }>('/assistant/stop', { method: 'POST' }),
   conversations: () => req<Conv[]>('/assistant/conversations'),
-  conversation: (id: string) => req<{ id: string; title: string; messages: { role: 'user' | 'assistant'; content: string; provider?: string; model?: string }[] }>(`/assistant/conversations/${id}`),
+  conversation: (id: string) => req<{ id: string; title: string; messages: { role: 'user' | 'assistant'; content: string; provider?: string; model?: string; tools?: { label: string; tool: string; status: 'done' | 'error' }[] }[] }>(`/assistant/conversations/${id}`),
   renameConversation: (id: string, title: string) => req<{ ok: boolean }>(`/assistant/conversations/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
   deleteConversation: (id: string) => req<{ ok: boolean }>(`/assistant/conversations/${id}`, { method: 'DELETE' }),
 }

@@ -27,6 +27,15 @@ class ModelProvider(ABC):
     @abstractmethod
     def configured(self) -> bool: ...
 
+    async def stream_turn(self, messages, model, temperature=0.7, kind: str = "chat", tools: list[dict] | None = None):
+        """Default for providers without tool support: plain text turn."""
+        first = True
+        async for chunk in self.stream_chat(messages, model, temperature):
+            if first:
+                first = False
+                yield "model", self.last_model
+            yield "delta", chunk
+
 
 class OpenAICompatProvider(ModelProvider):
     """Any OpenAI-compatible /v1 API (own server, OpenRouter, ...)."""
@@ -81,6 +90,14 @@ class OpenAICompatProvider(ModelProvider):
             raise ProviderError(f"{self.name}: {type(e).__name__}") from e
 
     async def stream_chat(self, messages, model, temperature=0.7, kind: str = "chat"):
+        """Plain text stream (no tools)."""
+        async for k, v in self.stream_turn(messages, model, temperature, kind):
+            if k == "delta":
+                yield v
+
+    async def stream_turn(self, messages, model, temperature=0.7, kind: str = "chat", tools: list[dict] | None = None):
+        """One model turn. Yields ("model", name) first, then ("delta", text)… and, if the model wants tools,
+        a final ("tool_calls", [{"id", "name", "arguments"}]). Tool-call fragments are merged by index."""
         if not self.configured():
             raise ProviderError(f"{self.name}: нет ключа")
         await self._guard()
@@ -92,6 +109,8 @@ class OpenAICompatProvider(ModelProvider):
             model = ms[0]
         self.last_model = model
         body = {"model": model, "messages": messages, "stream": True, "temperature": temperature}
+        if tools:
+            body["tools"] = tools
         if self.paid:
             body["usage"] = {"include": True}   # OpenRouter adds the exact cost to the final chunk
         cost = 0.0
@@ -101,7 +120,9 @@ class OpenAICompatProvider(ModelProvider):
                     if r.status_code != 200:
                         await r.aread()
                         raise ProviderError(f"{self.name}: HTTP {r.status_code}")
+                    yield "model", model
                     got = False
+                    calls: dict[int, dict] = {}
                     async for line in r.aiter_lines():
                         if not line.startswith("data:"):
                             continue
@@ -113,12 +134,27 @@ class OpenAICompatProvider(ModelProvider):
                             if isinstance(obj.get("usage"), dict):
                                 cost = float(obj["usage"].get("cost") or 0)
                             ch = obj.get("choices") or [{}]
-                            delta = ch[0].get("delta", {}).get("content")
+                            d = ch[0].get("delta") or {}
                         except (KeyError, IndexError, TypeError, ValueError):
                             continue
-                        if delta:
+                        for i, tc in enumerate(d.get("tool_calls") or []):
+                            slot = calls.setdefault(tc.get("index", i), {"id": "", "name": "", "arguments": ""})
+                            fn = tc.get("function") or {}
+                            slot["id"] = tc.get("id") or slot["id"]
+                            slot["name"] = fn.get("name") or slot["name"]
+                            args = fn.get("arguments")
+                            if isinstance(args, dict):
+                                slot["arguments"] = json.dumps(args, ensure_ascii=False)
+                            elif args:
+                                slot["arguments"] += args
+                        if d.get("content"):
                             got = True
-                            yield delta
+                            yield "delta", d["content"]
+                    if calls:
+                        out = [dict(c, id=c["id"] or f"call_{i}") for i, c in sorted(calls.items()) if c["name"]]
+                        if out:
+                            yield "tool_calls", out
+                            return
                     if not got:
                         raise ProviderError(f"{self.name}: пустой ответ")
         except httpx.HTTPError as e:
@@ -144,8 +180,9 @@ class ModelRouter:
         return next((p for p in self.providers if p.name == name), None)
 
     async def stream(self, messages: list[dict], model: str | None = None, prefer: str | None = None, temperature: float = 0.7,
-                     only: str | None = None):
-        """Yields ('meta', {...}) once, then ('delta', text). Falls back to the next provider if nothing was sent yet.
+                     only: str | None = None, tools: list[dict] | None = None):
+        """Yields ('meta', {...}) once, then ('delta', text)… and possibly ('tool_calls', [...]).
+        Falls back to the next provider if nothing was sent yet.
         only="siteaccess" -> that provider alone, no cloud fallback (private mode)."""
         order = list(self.providers)
         if prefer and (p := self.by_name(prefer)):
@@ -159,12 +196,16 @@ class ModelRouter:
                 continue
             started = False
             use_model = model if (not prefer or prefer == p.name) else None
+            name = use_model
             try:
-                async for chunk in p.stream_chat(messages, use_model, temperature):
+                async for kind, val in p.stream_turn(messages, use_model, temperature, "chat", tools):
+                    if kind == "model":
+                        name = val
+                        continue
                     if not started:
                         started = True
-                        yield "meta", {"provider": p.name, "model": p.last_model, "fallback": bool(errors), "skipped": errors}
-                    yield "delta", chunk
+                        yield "meta", {"provider": p.name, "model": name, "fallback": bool(errors), "skipped": errors}
+                    yield kind, val
                 if started:
                     return
             except ProviderError as e:

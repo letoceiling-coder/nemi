@@ -6,9 +6,10 @@ export type Route = 'chat' | 'projects' | 'tasks' | 'calendar' | 'meetings' | 'm
 export type SettingsCat = 'general' | 'memory' | 'account' | 'security' | 'notifications' | 'storage' | 'integrations' | 'models' | 'activity' | 'updates' | 'diagnostics'
 export type Theme = 'dark' | 'light'
 
-export interface Step { label: string; tool: string; status: 'done' | 'active' | 'pending' | 'error' }
+export interface Step { id?: string; label: string; tool: string; status: 'done' | 'active' | 'pending' | 'error' | 'wait'; detail?: string }
+export interface Approval { id: string; run: string; text: string; state: 'ask' | 'sending' | 'approved' | 'declined' | 'timeout' | 'stopped' }
 export interface Att { name: string; size: number; type: string; url?: string }
-export interface Msg { id: string; role: 'user' | 'assistant'; text: string; files?: Att[]; steps?: Step[]; confirm?: { text: string; state: 'ask' | 'ok' | 'no' }; running?: boolean; error?: string; memory?: string[] }
+export interface Msg { id: string; role: 'user' | 'assistant'; text: string; files?: Att[]; steps?: Step[]; approval?: Approval; running?: boolean; error?: string; memory?: string[] }
 export interface Bg { id: string; title: string; agent: string; progress: number; status: 'run' | 'done' | 'queued' | 'cancel' }
 
 interface S {
@@ -79,7 +80,8 @@ export const useApp = create<S>((set, get) => ({
       const c = await api.conversation(id)
       set({ route: 'chat', browserOpen: false, convId: c.id,
         messages: c.messages.map((m, i) => ({ id: `h${i}-${c.id}`, role: m.role, text: m.content,
-          steps: m.role === 'assistant' && m.model ? [{ label: 'Модель', tool: `${m.provider} · ${m.model}`, status: 'done' as const }] : undefined })) })
+          steps: m.role === 'assistant' && m.model ? [{ label: 'Модель', tool: `${m.provider} · ${m.model}`, status: 'done' as const },
+            ...(m.tools ?? []).map(t => ({ label: t.label, tool: t.tool, status: t.status }))] : undefined })) })
     } catch { get().notify('Не удалось открыть диалог'); get().loadConvs() }
   },
   removeConv: async id => {

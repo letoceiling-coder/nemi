@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from . import storage
 from .auth import current_user, hash_password, make_token, verify_password
 from .config import settings
-from . import budget, logs, memory
+from . import agent, budget, logs, memory
 from .db import AuditLog, Conversation, MemoryFact, Message, SessionLocal, User, audit, init_db, now
 from .providers import ModelRouter, ProviderError
 from .secrets import KNOWN, delete_secret, secrets_status, set_secret
@@ -239,7 +239,8 @@ def conversation(cid: str, uid: str = Depends(current_user), db: Session = Depen
     if not c or c.user_id != uid:   # isolation: other users' data is indistinguishable from missing
         raise HTTPException(404, "Диалог не найден")
     msgs = db.scalars(select(Message).where(Message.conv_id == cid, Message.user_id == uid).order_by(Message.created))
-    return {"id": c.id, "title": c.title, "messages": [{"role": m.role, "content": m.content, "provider": m.provider, "model": m.model} for m in msgs]}
+    return {"id": c.id, "title": c.title, "messages": [{"role": m.role, "content": m.content, "provider": m.provider, "model": m.model,
+                                                       "tools": json.loads(m.tools) if m.tools else []} for m in msgs]}
 
 
 @app.delete("/api/v1/assistant/conversations/{cid}")
@@ -251,6 +252,19 @@ def delete_conversation(cid: str, uid: str = Depends(current_user), db: Session 
     db.commit()
     audit(db, uid, "conversation.delete", cid)
     return {"ok": True}
+
+
+def _with_tools(m: Message) -> str:
+    """History for the model: an earlier answer also says which tools produced it, so the model doesn't
+    later 'confess' that it never looked anything up."""
+    if m.role != "assistant" or not m.tools:
+        return m.content
+    try:
+        done = [f"{s['tool']} ({s['label']})" for s in json.loads(m.tools) if s.get("status") == "done"]
+    except (ValueError, TypeError, KeyError):
+        return m.content
+    note = "(для этого ответа были вызваны инструменты: " + "; ".join(done) + ")\n"
+    return note + m.content if done else m.content
 
 
 @app.post("/api/v1/assistant/chat")
@@ -265,7 +279,7 @@ async def chat(b: ChatIn, uid: str = Depends(current_user)):
             db.commit()
         db.add(Message(conv_id=conv.id, user_id=uid, role="user", content=b.message))
         db.commit()
-        history = [{"role": m.role, "content": m.content} for m in db.scalars(
+        history = [{"role": m.role, "content": _with_tools(m)} for m in db.scalars(
             select(Message).where(Message.conv_id == conv.id, Message.user_id == uid).order_by(Message.created).limit(40))]
         cid = conv.id
         private = budget.private_only(uid)
@@ -282,20 +296,19 @@ async def chat(b: ChatIn, uid: str = Depends(current_user)):
         yield ev({"type": "conversation", "id": cid})
         if facts:
             yield ev({"type": "recall", "count": len(facts)})
-        text, meta, failed = [], {}, ""
-        async for kind, val in router_models.stream(messages, b.model, b.prefer, only="siteaccess" if private else None):
-            if kind == "meta":
-                meta = val
-                yield ev({"type": "meta", **val})
-                if val.get("fallback"):
-                    log.warning("chat fallback to %s/%s, skipped: %s", val["provider"], val["model"], "; ".join(val.get("skipped", [])))
-            elif kind == "delta":
-                text.append(val)
-                yield ev({"type": "delta", "text": val})
-            else:
-                log.error("chat failed: %s", val)
-                failed = val
-                yield ev({"type": "error", "message": val})
+        meta, failed, res = {}, "", {}
+        async for e in agent.stream_agent(router_models, uid, messages, res, model=b.model, prefer=b.prefer,
+                                          only="siteaccess" if private else None, private=private):
+            if e["type"] == "meta":
+                meta = {k: v for k, v in e.items() if k != "type"}
+                if e.get("fallback"):
+                    log.warning("chat fallback to %s/%s, skipped: %s", e["provider"], e["model"], "; ".join(e.get("skipped", [])))
+            elif e["type"] == "error":
+                failed = e["message"]
+                if failed != "Остановлено":
+                    log.error("chat failed: %s", failed)
+            yield ev(e)
+        text = [res.get("text", "")] if res.get("text", "").strip() else []
         # the cloud was used or refused because of the limit -> tell the UI how close the month is to the cap
         if meta.get("provider") == "openrouter" or "лимит" in failed or any("лимит" in x for x in meta.get("skipped", [])):
             st = budget.status()
@@ -303,7 +316,9 @@ async def chat(b: ChatIn, uid: str = Depends(current_user)):
                 yield ev({"type": "budget", **st})
         if text:
             with SessionLocal() as db:
-                db.add(Message(conv_id=cid, user_id=uid, role="assistant", content="".join(text), provider=meta.get("provider"), model=meta.get("model")))
+                steps = [s for s in res.get("steps", {}).values() if s["status"] in ("done", "error")]
+                db.add(Message(conv_id=cid, user_id=uid, role="assistant", content="".join(text), provider=meta.get("provider"),
+                               model=meta.get("model"), tools=json.dumps(steps, ensure_ascii=False) if steps else None))
                 db.commit()
                 audit(db, uid, "chat", f"{meta.get('provider')}/{meta.get('model')} fallback={meta.get('fallback')}")
             yield ev({"type": "answered"})   # UI unlocks now; memory extraction below may take a few seconds
@@ -324,6 +339,26 @@ async def chat(b: ChatIn, uid: str = Depends(current_user)):
         yield ev({"type": "done"})
 
     return StreamingResponse(gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+class ApprovalIn(BaseModel):
+    approve: bool
+
+
+@app.post("/api/v1/assistant/runs/{run_id}/approvals/{aid}")
+def approve(run_id: str, aid: str, b: ApprovalIn, uid: str = Depends(current_user), db: Session = Depends(get_db)):
+    if not agent.answer(uid, run_id, aid, b.approve):
+        raise HTTPException(404, "Запрос уже неактуален")
+    audit(db, uid, "agent.approval", "approved" if b.approve else "declined")
+    return {"ok": True}
+
+
+@app.post("/api/v1/assistant/stop")
+def emergency_stop(uid: str = Depends(current_user), db: Session = Depends(get_db)):
+    n = agent.stop_user(uid)
+    audit(db, uid, "agent.stop", str(n))
+    log.info("emergency stop: %d run(s)", n)
+    return {"stopped": n}
 
 
 # ---------- memory ----------

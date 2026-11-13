@@ -57,6 +57,7 @@ class Message(Base):
     content: Mapped[str] = mapped_column(Text)
     provider: Mapped[str | None] = mapped_column(String(40), nullable=True)
     model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    tools: Mapped[str | None] = mapped_column(Text, nullable=True)   # JSON [{label, tool, status}] of agent steps
     created: Mapped[datetime] = mapped_column(default=now)
 
 
@@ -104,6 +105,15 @@ class AuditLog(Base):
 
 def init_db() -> None:
     Base.metadata.create_all(engine)
+    _migrate()
+
+
+def _migrate() -> None:
+    """Additive column migrations for databases created by older versions (create_all never alters tables)."""
+    with engine.begin() as c:
+        cols = {r[1] for r in c.exec_driver_sql("PRAGMA table_info(messages)")}
+        if "tools" not in cols:
+            c.exec_driver_sql("ALTER TABLE messages ADD COLUMN tools TEXT")
 
 
 def audit(db: Session, user_id: str | None, action: str, detail: str = "") -> None:

@@ -25,7 +25,7 @@ import { Resizer, usePanelWidth } from './components/Resizer'
 import { useUpdates, startAutoCheck, justUpdatedTo } from './updates'
 import { Palette } from './components/Palette'
 import { Auth } from './components/Auth'
-import { userKey } from './api'
+import { api, userKey } from './api'
 
 const nav: { id: Route; label: string; icon: typeof Mail; badge?: number }[] = [
   { id: 'chat', label: 'Ассистент', icon: MessageSquare },
@@ -184,7 +184,11 @@ function TopBar() {
         <UpdateChip />
         <BgButton />
         <button
-          onClick={() => { setEmergency(!emergency); notify(emergency ? 'Агенты возобновлены' : 'Все агенты остановлены') }}
+          onClick={() => {
+            // emergency stop: running agents stop at once on the server, new tasks are blocked until resumed
+            if (!emergency) api.stopAgents().catch(() => {})
+            setEmergency(!emergency); notify(emergency ? 'Агенты возобновлены' : 'Все агенты остановлены')
+          }}
           className={clsx('mr-1 flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12.5px] font-medium transition-colors', emergency ? 'bg-err text-white' : 'text-fg2 hover:bg-err/15 hover:text-err')}
           title="Аварийная остановка всех агентов">
           <OctagonX size={15} />{emergency ? 'Остановлено' : 'Стоп'}

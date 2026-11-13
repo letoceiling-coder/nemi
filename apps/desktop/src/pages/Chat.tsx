@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
 import { ArrowUp, Paperclip, Mic, Square, ChevronDown, Copy, RotateCw, Check, Loader2, AlertCircle, Circle, Sparkles, Pencil, X, ChevronRight, ShieldCheck, Globe, FileText, FileSpreadsheet, File as FileIcon, Mail, CalendarCheck, BarChart3, FolderKanban, Mic as MicI, UploadCloud, Brain } from 'lucide-react'
-import { useApp, Msg, Step, Att } from '../store'
+import { useApp, Approval, Msg, Step, Att } from '../store'
 import { BrowserView } from '../components/BrowserView'
 import { Resizer, usePanelWidth } from '../components/Resizer'
 import { api, chatStream, getPref, setPref, ProviderModels, getAutoMemory, Budget } from '../api'
@@ -32,7 +32,7 @@ function StepsView({ steps, running }: { steps: Step[]; running?: boolean }) {
     <div className="mb-3 rounded-xl border border-line bg-surface">
       <button onClick={() => setOpen(o => !o)} className="flex w-full items-center gap-2 px-3 py-2 text-[13px] text-fg2">
         {running ? <Loader2 size={14} className="spin text-accent" /> : <Check size={14} className="text-ok" />}
-        <span className="flex-1 text-left">{running ? steps.find(s => s.status === 'active')?.label ?? 'Работаю…' : `Выполнено · ${done} шагов`}</span>
+        <span className="flex-1 text-left">{running ? (steps.find(s => s.status === 'wait') ? 'Жду вашего подтверждения' : [...steps].reverse().find(s => s.status === 'active')?.label ?? 'Работаю…') : `Выполнено · ${done} шагов`}</span>
         <ChevronRight size={14} className={clsx('transition-transform', open && 'rotate-90')} />
       </button>
       {open && (
@@ -43,8 +43,10 @@ function StepsView({ steps, running }: { steps: Step[]; running?: boolean }) {
               {s.status === 'active' && <Loader2 size={14} className="spin text-accent" />}
               {s.status === 'pending' && <Circle size={14} className="text-fg3" />}
               {s.status === 'error' && <AlertCircle size={14} className="text-err" />}
-              <span className={clsx(s.status === 'pending' && 'text-fg3')}>{s.label}</span>
-              <span className="ml-auto font-mono text-[11.5px] text-fg3">{s.tool}</span>
+              {s.status === 'wait' && <ShieldCheck size={14} className="text-warn" />}
+              <span className={clsx('min-w-0 truncate', s.status === 'pending' && 'text-fg3')}>{s.label}</span>
+              {s.detail && <span className={clsx('shrink-0 text-[12px]', s.status === 'error' ? 'text-err' : 'text-fg3')}>· {s.detail}</span>}
+              <span className="ml-auto shrink-0 font-mono text-[11.5px] text-fg3">{s.tool}</span>
             </li>
           ))}
         </ul>
@@ -82,6 +84,24 @@ function budgetNotice(b: Budget, notify: (t: string) => void) {
   notify(b.level === 'stop'
     ? `Месячный лимит OpenRouter ${b.limit} исчерпан — отвечает только ваш сервер. Лимит: Настройки → Модели AI`
     : `Израсходовано ${Math.round(b.ratio * 100)} % месячного лимита OpenRouter (${b.spent.toFixed(2)} из ${b.limit})`)
+}
+
+function ApprovalCard({ a, onAnswer }: { a: Approval; onAnswer: (ok: boolean) => void }) {
+  const done: Record<string, [string, 'ok' | 'neutral' | 'err']> = {
+    approved: ['Разрешено', 'ok'], declined: ['Отклонено', 'neutral'], timeout: ['Нет ответа — отменено', 'neutral'], stopped: ['Остановлено', 'err'],
+  }
+  return (
+    <div className="anim-in mt-3 rounded-xl border border-warn/40 bg-warn/10 p-3.5" role="group" aria-label="Требуется подтверждение">
+      <div className="mb-1 flex items-center gap-1.5 text-[12.5px] font-medium text-warn"><ShieldCheck size={14} />Требуется ваше подтверждение</div>
+      <div className="mb-3 text-[13.5px]">{a.text}</div>
+      {a.state === 'ask' || a.state === 'sending' ? (
+        <div className="flex gap-2">
+          <Button variant="primary" size="sm" disabled={a.state === 'sending'} onClick={() => onAnswer(true)}>Разрешить</Button>
+          <Button size="sm" disabled={a.state === 'sending'} onClick={() => onAnswer(false)}>Отклонить</Button>
+        </div>
+      ) : <Badge tone={done[a.state][1]}>{done[a.state][0]}</Badge>}
+    </div>
+  )
 }
 
 const cards = [
@@ -141,7 +161,8 @@ export default function ChatPage() {
   const patch = (id: string, f: (m: Msg) => Msg) => setMessages(ms => ms.map(m => m.id === id ? f(m) : m))
   function stop() {
     run.current++; abort.current?.abort()
-    setMessages(ms => ms.map(m => m.running ? { ...m, running: false, text: m.text || 'Остановлено пользователем.', steps: m.steps?.map(s => s.status === 'active' ? { ...s, status: 'error' as const } : s) } : m))
+    setMessages(ms => ms.map(m => m.running || m.approval?.state === 'ask' ? { ...m, running: false, error: 'Остановлено', approval: m.approval?.state === 'ask' ? { ...m.approval, state: 'stopped' } : m.approval,
+      steps: m.steps?.map(s => s.status === 'active' || s.status === 'wait' || s.status === 'pending' ? { ...s, status: 'error' as const } : s) } : m))
   }
   async function send(text: string, atts: Att[] = files) {
     if ((!text.trim() && !atts.length) || busy) return
@@ -149,7 +170,7 @@ export default function ChatPage() {
     const q = text.trim() || 'Посмотри вложенные файлы'
     const id = 'a' + Date.now(); const my = ++run.current
     const ac = new AbortController(); abort.current = ac
-    const steps: Step[] = [{ label: 'Выбираю модель', tool: 'Model Router', status: 'active' }, { label: 'Формирую ответ', tool: '—', status: 'pending' }]
+    const steps: Step[] = [{ label: 'Выбираю модель', tool: 'Model Router', status: 'active' }]
     setMessages(ms => [...ms, { id: 'u' + Date.now(), role: 'user', text, files: atts.length ? atts : undefined }, { id, role: 'assistant', text: '', steps, running: true }])
     const doc = atts.find(a => !a.type.startsWith('image/'))
     if (doc) addBg(`Индексация: ${doc.name}`, 'Knowledge Agent')
@@ -157,22 +178,45 @@ export default function ChatPage() {
     const pref = getPref()
     let acc = ''
     let recalled = 0
+    let base: Step[] = []                       // memory + model
+    const tools: Step[] = []                    // agent steps, in order
+    let answering = false
+    const rebuild = () => {
+      const busyTool = tools.some(t => t.status === 'active' || t.status === 'wait')
+      const final: Step = { label: 'Формирую ответ', tool: '—', status: busyTool ? 'pending' : 'active' }
+      patch(id, m => ({ ...m, steps: [...base, ...tools, final] }))
+    }
     const finish = () => patch(id, m => m.running ? { ...m, running: false, steps: m.steps?.map(s => ({ ...s, status: s.status === 'error' ? s.status : 'done' as const })) } : m)
     for await (const ev of chatStream({ message: q, conversation_id: useApp.getState().convId, model: pref.model, prefer: pref.provider, remember: getAutoMemory() }, ac.signal)) {
       // memory arrives after the answer; it belongs to this message even if the user already sent the next one
       if (ev.type === 'memory') { patch(id, m => ({ ...m, memory: ev.added })); continue }
       if (ev.type === 'budget') { budgetNotice(ev, notify); continue }
+      if (ev.type === 'approval') { patch(id, m => ({ ...m, approval: { id: ev.id, run: ev.run, text: ev.text, state: 'ask' } })); continue }
+      if (ev.type === 'approval_done') { patch(id, m => m.approval?.id === ev.id ? { ...m, approval: { ...m.approval, state: ev.result } } : m); continue }
+      if (ev.type === 'ui') { if (ev.action === 'open_browser') useApp.getState().openBrowser(ev.url); continue }
       if (run.current !== my) continue
       if (ev.type === 'conversation') { useApp.getState().setConvId(ev.id); useApp.getState().loadConvs() }
       else if (ev.type === 'recall') recalled = ev.count
       else if (ev.type === 'answered') finish()
       else if (ev.type === 'meta') {
-        patch(id, m => ({ ...m, steps: [...(recalled ? [{ label: `Учтено из памяти: ${recalled}`, tool: 'Memory', status: 'done' as const }] : []), { label: 'Выбрана модель', tool: `${ev.provider} · ${ev.model}`, status: 'done' }, { label: ev.fallback ? 'Основной сервер недоступен — использован резервный' : 'Формирую ответ', tool: '—', status: 'active' }] }))
-      } else if (ev.type === 'delta') { acc += ev.text; patch(id, m => ({ ...m, text: acc })) }
+        base = [...(recalled ? [{ label: `Учтено из памяти: ${recalled}`, tool: 'Memory', status: 'done' as const }] : []),
+          { label: ev.fallback ? 'Основной сервер недоступен — использован резервный' : 'Выбрана модель', tool: `${ev.provider} · ${ev.model}`, status: 'done' as const }]
+        rebuild()
+      } else if (ev.type === 'step') {
+        const i = tools.findIndex(t => t.id === ev.id)
+        const st: Step = { id: ev.id, label: ev.label, tool: ev.tool, status: ev.status, detail: ev.detail }
+        if (i >= 0) tools[i] = st; else tools.push(st)
+        rebuild()
+      } else if (ev.type === 'delta') { acc += ev.text; if (!answering && ev.text.trim()) { answering = true; rebuild() } patch(id, m => ({ ...m, text: acc })) }
       else if (ev.type === 'error') { patch(id, m => ({ ...m, running: false, error: ev.message, steps: m.steps?.map(s => s.status === 'active' ? { ...s, status: 'error' as const } : s) })); return }
     }
     if (run.current === my) finish()
     useApp.getState().loadConvs()   // move the dialog to the top of «Недавние»
+  }
+  async function decide(mid: string, a: Approval, ok: boolean) {
+    patch(mid, m => m.approval ? { ...m, approval: { ...m.approval, state: 'sending' } } : m)
+    try { await api.approve(a.run, a.id, ok) }
+    catch { patch(mid, m => m.approval ? { ...m, approval: { ...m.approval, state: 'timeout' } } : m); notify('Запрос уже неактуален') }
   }
   const retry = (idx: number) => { const u = messages[idx - 1]; if (u) { setMessages(ms => ms.slice(0, idx - 1)); setTimeout(() => send(u.text, u.files ?? []), 0) } }
   const submitEdit = (id: string) => { const i = messages.findIndex(m => m.id === id); const t = val; setMessages(ms => ms.slice(0, i)); setEditing(null); setVal(''); setTimeout(() => send(t), 0) }
@@ -276,18 +320,7 @@ export default function ChatPage() {
                     <span><span className="font-medium text-fg">Запомнил:</span> {m.memory.join(' · ')}</span>
                   </button>
                 )}
-                {m.confirm && (
-                  <div className="mt-3 rounded-xl border border-warn/40 bg-warn/10 p-3.5">
-                    <div className="mb-1 flex items-center gap-1.5 text-[12.5px] font-medium text-warn"><ShieldCheck size={14} />Требуется подтверждение · Уровень 4</div>
-                    <div className="mb-3 text-[13.5px]">{m.confirm.text}</div>
-                    {m.confirm.state === 'ask' ? (
-                      <div className="flex gap-2">
-                        <Button variant="primary" size="sm" onClick={() => { patch(m.id, x => ({ ...x, confirm: { ...x.confirm!, state: 'ok' } })); notify('Письмо отправлено (демо)') }}>Отправить</Button>
-                        <Button size="sm" onClick={() => patch(m.id, x => ({ ...x, confirm: { ...x.confirm!, state: 'no' } }))}>Только черновик</Button>
-                      </div>
-                    ) : <Badge tone={m.confirm.state === 'ok' ? 'ok' : 'neutral'}>{m.confirm.state === 'ok' ? 'Отправлено' : 'Сохранено как черновик'}</Badge>}
-                  </div>
-                )}
+                {m.approval && <ApprovalCard a={m.approval} onAnswer={ok => decide(m.id, m.approval!, ok)} />}
                 {!m.running && m.text && (
                   <div className="mt-2 flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                     <IconButton label="Копировать" className="!size-7" onClick={() => { navigator.clipboard?.writeText(m.text); notify('Скопировано') }}><Copy size={13} /></IconButton>
