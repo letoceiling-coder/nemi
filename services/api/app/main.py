@@ -43,7 +43,7 @@ async def lifespan(_: FastAPI):
     sync_task.cancel()
 
 
-app = FastAPI(title="Personal AI Assistant API", version="0.4.0", lifespan=lifespan)
+app = FastAPI(title="Personal AI Assistant API", version="0.5.0", lifespan=lifespan)
 app.include_router(tasks_mod.router)
 app.include_router(events_mod.router)
 app.include_router(calsync.router)
