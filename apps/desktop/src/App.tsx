@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import clsx from 'clsx'
 import {
   MessageSquare, FolderKanban, CheckSquare, CalendarDays, Mic, Mail, Globe, Workflow, BookOpen, BarChart3, Plug, Cpu, Settings, Activity,
-  PanelLeft, PanelRight, Plus, Search, Sun, Moon, OctagonX, Lock, Loader2, X, Check,
+  PanelLeft, PanelRight, Plus, Search, Sun, Moon, OctagonX, Lock, Loader2, X, Check, ArrowUpCircle,
 } from 'lucide-react'
 import { useApp, Route } from './store'
 import { Kbd, IconButton, Progress } from './ui'
@@ -22,6 +22,7 @@ import { ActivityPage } from './pages/Activity'
 import { SettingsPage } from './pages/Settings'
 import { RightPanel } from './components/RightPanel'
 import { Resizer, usePanelWidth } from './components/Resizer'
+import { useUpdates, startAutoCheck, justUpdatedTo } from './updates'
 import { Palette } from './components/Palette'
 import { Auth } from './components/Auth'
 import { userKey } from './api'
@@ -157,6 +158,19 @@ function BgButton() {
   )
 }
 
+/** Shown only when a newer signed version is published; opens Settings → Обновления */
+function UpdateChip() {
+  const { state, info } = useUpdates()
+  const { go, setSettingsCat } = useApp()
+  if (!info || !['available', 'downloading', 'installing'].includes(state)) return null
+  return (
+    <button onClick={() => { setSettingsCat('updates'); go('settings') }} title="Открыть «Обновления»"
+      className="mr-1 flex h-8 items-center gap-1.5 rounded-lg bg-accentsoft px-2.5 text-[12.5px] font-medium text-accent hover:bg-accent/20">
+      <ArrowUpCircle size={15} />{state === 'available' ? `Обновление ${info.version}` : 'Обновляется…'}
+    </button>
+  )
+}
+
 function TopBar() {
   const { toggleSidebar, toggleRight, rightPanel, theme, toggleTheme, emergency, setEmergency, notify, route } = useApp()
   const label = [...nav, ...nav2].find(n => n.id === route)?.label
@@ -167,6 +181,7 @@ function TopBar() {
         <span className="ml-1 text-[13.5px] text-fg2">{label}</span>
       </div>
       <div className="flex items-center gap-1">
+        <UpdateChip />
         <BgButton />
         <button
           onClick={() => { setEmergency(!emergency); notify(emergency ? 'Агенты возобновлены' : 'Все агенты остановлены') }}
@@ -190,6 +205,8 @@ export default function App() {
 function Shell() {
   const { route, rightPanel, setPalette, toast, sidebar, tickBg } = useApp()
   useEffect(() => { const t = setInterval(tickBg, 1000); return () => clearInterval(t) }, [tickBg])
+  useEffect(() => startAutoCheck(), [])
+  useEffect(() => { justUpdatedTo().then(v => { if (v) useApp.getState().notify(`NEMI обновлён до версии ${v}`) }) }, [])
   useEffect(() => {
     // автоблокировка по бездействию (минуты в localStorage, 0 = выкл.)
     let last = Date.now()

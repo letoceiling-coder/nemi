@@ -3,6 +3,7 @@ import clsx from 'clsx'
 import { Palette as PaletteIcon, ShieldCheck, RefreshCw, Activity, HardDrive, Bell, Loader2, Download, Search, User, Plug, Cpu, ListChecks, LogOut, Brain } from 'lucide-react'
 import { MemoryPanel } from './Memory'
 import { DiagnosticsPanel } from './Diagnostics'
+import { UpdatesPanel } from './Updates'
 import { useApp, SettingsCat as Cat } from '../store'
 import { Card, Switch, Badge, Button, Progress, Input, Tabs } from '../ui'
 import { getUser, userKey } from '../api'
@@ -22,39 +23,6 @@ const Row = ({ title, hint, children }: { title: string; hint?: string; children
     <div><div>{title}</div>{hint && <div className="text-[12.5px] text-fg3">{hint}</div>}</div>{children}
   </div>
 )
-
-function Updates() {
-  const { notify } = useApp()
-  const [st, setSt] = useState<'idle' | 'check' | 'found' | 'dl' | 'done'>('idle')
-  const [p, setP] = useState(0)
-  const [ch, setCh] = useState<'stable' | 'beta'>('stable')
-  const check = () => { setSt('check'); setTimeout(() => setSt('found'), 1200) }
-  const install = () => { setSt('dl'); let v = 0; const t = setInterval(() => { v += 10; setP(v); if (v >= 100) { clearInterval(t); setSt('done') } }, 250) }
-  return (
-    <div className="space-y-4">
-      <Card>
-        <div className="flex items-center justify-between">
-          <div><div className="text-[12.5px] text-fg3">Установленная версия</div><div className="text-[20px] font-semibold">0.3.2</div></div>
-          <Tabs value={ch} onChange={setCh} items={[{ id: 'stable', label: 'Stable' }, { id: 'beta', label: 'Beta' }]} />
-        </div>
-        <div className="mt-4 flex items-center gap-3">
-          <Button icon={st === 'check' ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />} disabled={st === 'check' || st === 'dl'} onClick={check}>Проверить обновления</Button>
-          <span className="text-fg3">{st === 'idle' && 'Последняя проверка: сегодня, 09:00'}{st === 'check' && 'Проверяю…'}{st === 'done' && 'Версия 0.4.0 установлена. Перезапуск выполнен, данные сохранены.'}</span>
-        </div>
-      </Card>
-      {(st === 'found' || st === 'dl') && (
-        <Card className="anim-in border-accent/50">
-          <div className="flex items-center justify-between"><div><div className="font-medium">Доступна версия 0.4.0</div><div className="text-[12.5px] text-fg3">Выпущена 11 ноября · 84 МБ · подпись проверена</div></div><Badge tone="accent">{ch}</Badge></div>
-          <ul className="mt-3 list-disc space-y-1 pl-5 text-fg2"><li>Новый центр активности</li><li>Режим «только черновики» для почты</li><li>Исправлено: сбой при повторной загрузке в S3</li></ul>
-          {st === 'dl' ? <div className="mt-4"><Progress value={p} /><div className="mt-1 text-[12px] text-fg3">Загрузка и проверка контрольной суммы… {p}%</div></div>
-            : <Button className="mt-4" variant="primary" icon={<Download size={14} />} onClick={install}>Скачать и установить</Button>}
-          <div className="mt-3 text-[12px] text-fg3">База данных, история чатов, память, проекты и настройки при обновлении сохраняются. Предыдущая версия остаётся для отката.</div>
-        </Card>
-      )}
-      <Card><Row title="Автоматическая проверка" hint="Раз в сутки"><Switch checked onChange={() => notify('Сохранено')} label="Автопроверка" /></Row></Card>
-    </div>
-  )
-}
 
 export function SettingsPage() {
   const { theme, toggleTheme, notify, settingsCat: cat, setSettingsCat: setCat, setAuthed } = useApp()
@@ -90,7 +58,7 @@ export function SettingsPage() {
           <Card><Row title="Наблюдение за экраном" hint="Только по явному включению, с индикатором">{t('screen', 'Экран')}</Row><Row title="Уровни разрешений" hint="Чтение · Подготовка · Изменение · Внешние действия"><Button size="sm" onClick={() => notify('Политики по инструментам — в рабочей версии')}>Политики</Button></Row></Card></div>}
         {cat === 'notifications' && <Card><Row title="Уведомления Windows">{t('win', 'Windows')}</Row><Row title="Звук">{t('sound', 'Звук')}</Row><Row title="Системный трей">{t('tray', 'Трей')}</Row><Row title="Повторные напоминания">{t('remind', 'Повторы')}</Row></Card>}
         {cat === 'storage' && <div className="space-y-4"><Card><Row title="Selectel S3" hint="Бакет: personal-assistant · ru-1"><Badge tone="ok" dot>Подключено</Badge></Row><Row title="Использовано"><div className="w-40"><Progress value={34} /><div className="mt-1 text-right text-[12px] text-fg3">8.2 из 24 ГБ</div></div></Row><Row title="Проверка соединения"><Button size="sm" onClick={() => notify('Соединение в порядке')}>Проверить</Button></Row></Card></div>}
-        {cat === 'updates' && <Updates />}
+        {cat === 'updates' && <UpdatesPanel />}
         {cat === 'memory' && <MemoryPanel />}
         {cat === 'diagnostics' && <DiagnosticsPanel />}
       </div></div>}

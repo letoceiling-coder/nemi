@@ -25,10 +25,24 @@ fn spawn_backend(app: &AppHandle) -> Option<Child> {
     let mut cmd = if let Some(dir) = dev_api_dir() {
         let py = dir.join(".venv").join("Scripts").join("python.exe");
         let mut c = Command::new(py);
-        c.args(["-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8731"]).current_dir(dir);
+        c.args([
+            "-m",
+            "uvicorn",
+            "app.main:app",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "8731",
+        ])
+        .current_dir(dir);
         c
     } else {
-        let exe = app.path().resource_dir().ok()?.join("api").join("nemi-api.exe");
+        let exe = app
+            .path()
+            .resource_dir()
+            .ok()?
+            .join("api")
+            .join("nemi-api.exe");
         Command::new(exe)
     };
     #[cfg(windows)]
@@ -36,7 +50,11 @@ fn spawn_backend(app: &AppHandle) -> Option<Child> {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
-    let child = cmd.stdout(Stdio::null()).stderr(Stdio::null()).spawn().ok()?;
+    let child = cmd
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
     #[cfg(windows)]
     bind_to_app_lifetime(&child);
     Some(child)
@@ -71,9 +89,18 @@ fn dev_api_dir() -> Option<PathBuf> {
         return None;
     }
     // apps/desktop/src-tauri -> ../../../services/api
-    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("..").join("services").join("api");
+    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("..")
+        .join("services")
+        .join("api");
     let p = p.canonicalize().ok()?;
-    p.join(".venv").join("Scripts").join("python.exe").exists().then_some(p)
+    p.join(".venv")
+        .join("Scripts")
+        .join("python.exe")
+        .exists()
+        .then_some(p)
 }
 
 fn show_main(app: &AppHandle) {
@@ -104,6 +131,8 @@ fn stop_backend(app: &AppHandle) {
 
 pub fn run() {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             app.manage(Backend(Mutex::new(spawn_backend(app.handle()))));
 
@@ -124,7 +153,12 @@ pub fn run() {
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, e| {
-                    if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = e {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = e
+                    {
                         show_main(tray.app_handle());
                     }
                 })
