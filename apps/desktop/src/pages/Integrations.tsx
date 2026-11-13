@@ -51,7 +51,7 @@ export function IntegrationsPage() {
       <Modal open={!!cur} onClose={() => setCfg(null)} title={cur ? `${cur.name}` : ''} footer={<>
         {cur && state[cur.id] && <Button variant="danger" onClick={() => { setState(s => ({ ...s, [cur.id]: false })); setCfg(null); notify('Интеграция отключена') }}>Отключить</Button>}
         <Button onClick={() => setCfg(null)}>Закрыть</Button>
-        <Button variant="primary" onClick={saveKey} disabled={busy || (!!secretOf[cur!.id] && key.trim().length < 8)}>{busy ? 'Проверяю…' : 'Проверить и сохранить'}</Button></>}>
+        <Button variant="primary" onClick={saveKey} disabled={busy || !cur || (!!secretOf[cur.id] && key.trim().length < 8)}>{busy ? 'Проверяю…' : 'Проверить и сохранить'}</Button></>}>
         <p className="mb-3 text-fg2">Секреты хранятся в Windows Credential Manager и не попадают в логи и Git.</p>
         {cur?.id === 'i0'
           ? <div className="space-y-2"><Input type="password" placeholder="API-ключ OpenRouter (sk-or-…)" value={key} onChange={e => setKey(e.target.value)} />

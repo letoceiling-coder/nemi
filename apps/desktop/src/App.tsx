@@ -22,6 +22,7 @@ import { ActivityPage } from './pages/Activity'
 import { SettingsPage } from './pages/Settings'
 import { RightPanel } from './components/RightPanel'
 import { Resizer, usePanelWidth } from './components/Resizer'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { useUpdates, startAutoCheck, justUpdatedTo } from './updates'
 import { startReminders, isToday, reminderText } from './tasks'
 import { Palette } from './components/Palette'
@@ -248,7 +249,7 @@ function Shell() {
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar />
         <div className="flex min-h-0 flex-1">
-          <main key={route} className="min-w-0 flex-1">{page}</main>
+          <main key={route} className="min-w-0 flex-1"><ErrorBoundary onHome={() => useApp.getState().go('chat')}>{page}</ErrorBoundary></main>
           {rightPanel && route !== 'settings' && route !== 'browser' && <RightPanel />}
         </div>
       </div>
