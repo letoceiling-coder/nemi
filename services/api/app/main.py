@@ -40,7 +40,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Personal AI Assistant API", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="Personal AI Assistant API", version="0.4.0", lifespan=lifespan)
 app.include_router(tasks_mod.router)
 app.include_router(events_mod.router)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["*"], allow_headers=["*"])
