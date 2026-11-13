@@ -1,7 +1,9 @@
 """Model Provider abstraction. Business logic never talks to a concrete API: it uses ModelRouter.
 Priority: own server (siteaccess) -> OpenRouter fallback when the server is busy/unavailable."""
 from __future__ import annotations
+import asyncio
 import json
+import time
 from abc import ABC, abstractmethod
 from typing import AsyncIterator
 import httpx
@@ -12,6 +14,10 @@ from .secrets import get_secret
 
 class ProviderError(Exception):
     """Provider unavailable/busy -> router should try the next one."""
+
+    def __init__(self, msg: str, status: int | None = None):
+        super().__init__(msg)
+        self.status = status
 
 
 class ModelProvider(ABC):
@@ -46,8 +52,8 @@ class OpenAICompatProvider(ModelProvider):
         self.default_model, self.extra = default_model, extra_headers or {}
         self.paid = paid   # paid per call -> monthly limit is enforced and every call's cost goes to the ledger
 
-    async def _guard(self) -> None:
-        if self.paid:
+    async def _guard(self, model: str | None = None) -> None:
+        if self.paid and not budget.is_free(model):   # free models cost nothing: the money limit does not apply
             try:
                 await budget.check()
             except budget.BudgetExceeded as e:
@@ -100,13 +106,13 @@ class OpenAICompatProvider(ModelProvider):
         a final ("tool_calls", [{"id", "name", "arguments"}]). Tool-call fragments are merged by index."""
         if not self.configured():
             raise ProviderError(f"{self.name}: нет ключа")
-        await self._guard()
         model = model or self.default_model
         if not model:  # own server: pick the first available model
             ms = await self.list_models()
             if not ms:
                 raise ProviderError(f"{self.name}: нет моделей")
             model = ms[0]
+        await self._guard(model)
         self.last_model = model
         body = {"model": model, "messages": messages, "stream": True, "temperature": temperature}
         if tools:
@@ -119,7 +125,7 @@ class OpenAICompatProvider(ModelProvider):
                 async with c.stream("POST", f"{self.base_url}/chat/completions", json=body, headers=self._headers()) as r:
                     if r.status_code != 200:
                         await r.aread()
-                        raise ProviderError(f"{self.name}: HTTP {r.status_code}")
+                        raise ProviderError(f"{self.name}: HTTP {r.status_code}", r.status_code)
                     yield "model", model
                     got = False
                     calls: dict[int, dict] = {}
@@ -173,43 +179,98 @@ def build_providers() -> list[ModelProvider]:
 
 
 class ModelRouter:
+    """Chooses where a chat turn goes. Route chain (each route = provider + model):
+         the user's explicit choice -> own server -> free OpenRouter models -> cheap paid model.
+    A route is abandoned (and the next one tried) on an error or if it sends nothing within its first-token
+    deadline - e.g. the GPU is busy and the request just sits in the queue. That is safe because nothing has been
+    shown yet. Routes that failed recently are skipped for a while (circuit breaker)."""
+
     def __init__(self, providers: list[ModelProvider] | None = None):
         self.providers = providers or build_providers()
+        self.down: dict[str, float] = {}           # route key -> monotonic time until which it is skipped
 
     def by_name(self, name: str) -> ModelProvider | None:
         return next((p for p in self.providers if p.name == name), None)
 
+    def routes(self, model: str | None, prefer: str | None, only: str | None) -> list[tuple[str, str | None]]:
+        r: list[tuple[str, str | None]] = []
+        if prefer:
+            r.append((prefer, model))
+        if only:
+            return [x for x in r if x[0] == only] or [(only, None)]
+        r.append(("siteaccess", None))
+        r += [("openrouter", m) for m in settings.chat_free_models]
+        r += [("openrouter", m) for m in settings.chat_paid_models]
+        seen, out = set(), []
+        for x in r:
+            if x not in seen and self.by_name(x[0]):
+                seen.add(x)
+                out.append(x)
+        return out
+
+    @staticmethod
+    def _key(provider: str, model: str | None) -> str:
+        return f"{provider}/{model or '*'}"
+
+    def _mark_down(self, provider: str, model: str | None, e: Exception) -> None:
+        secs = settings.cooldown_rate_limited if getattr(e, "status", None) == 429 else settings.cooldown_failed
+        self.down[self._key(provider, model)] = time.monotonic() + secs
+
+    def status(self) -> dict:
+        now = time.monotonic()
+        return {k: round(t - now) for k, t in self.down.items() if t > now}
+
     async def stream(self, messages: list[dict], model: str | None = None, prefer: str | None = None, temperature: float = 0.7,
                      only: str | None = None, tools: list[dict] | None = None):
-        """Yields ('meta', {...}) once, then ('delta', text)… and possibly ('tool_calls', [...]).
-        Falls back to the next provider if nothing was sent yet.
+        """Yields ('meta', {...}) once, then ('delta', text)... and possibly ('tool_calls', [...]).
         only="siteaccess" -> that provider alone, no cloud fallback (private mode)."""
-        order = list(self.providers)
-        if prefer and (p := self.by_name(prefer)):
-            order = [p] + [x for x in order if x is not p]
-        if only:
-            order = [x for x in order if x.name == only]
         errors: list[str] = []
-        for p in order:
+        chain = self.routes(model, prefer, only)
+        for i, (pname, m) in enumerate(chain):
+            p = self.by_name(pname)
+            key = self._key(pname, m)
+            last = i == len(chain) - 1
             if not p.configured():
-                errors.append(f"{p.name}: нет ключа")
+                errors.append(f"{pname}: нет ключа")
                 continue
-            started = False
-            use_model = model if (not prefer or prefer == p.name) else None
-            name = use_model
+            if not last and self.down.get(key, 0) > time.monotonic():
+                errors.append(f"{m or pname}: недавно не отвечал, пропущен")
+                continue
+            if budget.is_free(m) and not budget.free_quota_ok():
+                errors.append(f"{m}: дневной лимит бесплатных запросов исчерпан")
+                continue
+            deadline = settings.first_token_own if pname == "siteaccess" else settings.first_token_cloud
+            agen = p.stream_turn(messages, m, temperature, "chat", tools)
+            started, name = False, m
             try:
-                async for kind, val in p.stream_turn(messages, use_model, temperature, "chat", tools):
+                t_end = time.monotonic() + deadline
+                while True:
+                    try:
+                        if started:
+                            kind, val = await agen.__anext__()
+                        else:
+                            kind, val = await asyncio.wait_for(agen.__anext__(), max(0.1, t_end - time.monotonic()))
+                    except StopAsyncIteration:
+                        break
                     if kind == "model":
                         name = val
                         continue
                     if not started:
                         started = True
-                        yield "meta", {"provider": p.name, "model": name, "fallback": bool(errors), "skipped": errors}
+                        self.down.pop(key, None)
+                        yield "meta", {"provider": pname, "model": name, "fallback": bool(errors), "skipped": errors}
                     yield kind, val
                 if started:
                     return
+                errors.append(f"{name or pname}: пустой ответ")
+            except asyncio.TimeoutError:
+                await agen.aclose()
+                errors.append(f"{name or pname}: нет ответа за {deadline:g} с (занят)")
+                self._mark_down(pname, m, TimeoutError())
             except ProviderError as e:
-                errors.append(str(e))
+                await agen.aclose()
+                errors.append(f"{m}: {e}" if m else str(e))
+                self._mark_down(pname, m, e)
                 if started:  # mid-stream failure: cannot silently switch without duplicating text
                     yield "error", f"Соединение прервано ({e})"
                     return

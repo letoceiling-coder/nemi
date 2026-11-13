@@ -18,7 +18,7 @@ from .secrets import get_secret
 log = logging.getLogger("pai.budget")
 WARN_AT = 0.8
 REMOTE_TTL = 60.0
-_remote: dict = {"value": 0.0, "month": "", "at": 0.0}
+_remote: dict = {"value": 0.0, "month": "", "at": 0.0, "free_left": None}
 
 
 class BudgetExceeded(Exception):
@@ -94,9 +94,22 @@ async def refresh_remote(force: bool = False) -> None:
         async with httpx.AsyncClient(timeout=5) as c:
             r = await c.get(f"{settings.openrouter_base_url}/key", headers={"Authorization": f"Bearer {key}"})
         if r.status_code == 200:
-            _remote.update(value=float(r.json()["data"].get("usage_monthly") or 0.0), month=_month())
+            d = r.json()["data"]
+            free = d.get("free_model_daily_requests") or {}
+            _remote.update(value=float(d.get("usage_monthly") or 0.0), month=_month(),
+                           free_left=free.get("remaining") if isinstance(free.get("remaining"), int) else None)
     except (httpx.HTTPError, KeyError, ValueError, TypeError) as e:
         log.warning("budget: OpenRouter usage unavailable (%s)", type(e).__name__)
+
+
+def is_free(model: str | None) -> bool:
+    return bool(model) and (model.endswith(":free") or model == "openrouter/free")
+
+
+def free_quota_ok(min_left: int = 5) -> bool:
+    """Free models have a daily request quota per key; unknown counts as available."""
+    left = _remote.get("free_left")
+    return left is None or left >= min_left
 
 
 def spent() -> float:

@@ -241,6 +241,147 @@ async def _open_in_browser(ctx: Ctx, a: dict) -> str:
     return f"Открыто во встроенном браузере: {url}"
 
 
+
+# ---------- tasks ----------
+def _when(v) -> tuple[datetime | None, bool]:
+    """ISO from the model: "2026-11-14T11:00" (local) or "2026-11-14" (that day, no time)."""
+    if not v:
+        return None, False
+    v = str(v).strip()
+    try:
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", v):
+            return datetime.fromisoformat(v).replace(hour=23, minute=59).astimezone(), False
+        return datetime.fromisoformat(v.replace("Z", "+00:00")).astimezone(), True
+    except ValueError:
+        raise ToolError(f"не понял дату «{v}»: нужен формат ГГГГ-ММ-ДДTЧЧ:ММ")
+
+
+def _fmt_task(t: dict) -> str:
+    due = ""
+    if t["due"]:
+        d = datetime.fromisoformat(t["due"]).astimezone()
+        due = f", срок {d:%d.%m %H:%M}" if t["due_time"] else f", срок {d:%d.%m}"
+    pr = {"high": ", высокий приоритет", "low": ", низкий приоритет"}.get(t["priority"], "")
+    proj = f", проект «{t['project']}»" if t["project"] else ""
+    st = {"done": " [выполнена]", "doing": " [в работе]"}.get(t["status"], "")
+    return f"[{t['id']}] {t['title']}{st}{due}{pr}{proj}"
+
+
+def _project_id(db, uid: str, name: str | None) -> str | None:
+    from .db import Project
+    from .tasks import COLORS
+    name = (name or "").strip()
+    if not name:
+        return None
+    p = next((x for x in db.scalars(select(Project).where(Project.user_id == uid)) if x.name.lower() == name.lower()), None)
+    if not p:
+        n = len(db.scalars(select(Project).where(Project.user_id == uid)).all())
+        p = Project(user_id=uid, name=name[:120], color=COLORS[n % len(COLORS)])
+        db.add(p)
+        db.commit()
+    return p.id
+
+
+async def _tasks_list(ctx: Ctx, a: dict) -> str:
+    from .tasks import list_tasks
+    view = a.get("view") if a.get("view") in ("today", "upcoming", "overdue", "done", "all") else "today"
+    with SessionLocal() as db:
+        rows = list_tasks(db, ctx.uid, view)
+        if a.get("project"):
+            rows = [t for t in rows if (t["project"] or "").lower() == str(a["project"]).lower()]
+    if not rows:
+        return "Задач нет."
+    return "\n".join(_fmt_task(t) for t in rows[:30])
+
+
+async def _task_create(ctx: Ctx, a: dict) -> str:
+    from .tasks import create_task, task_out
+    title = " ".join(str(a.get("title", "")).split())
+    if len(title) < 2:
+        raise ToolError("пустое название задачи")
+    due, has_time = _when(a.get("due"))
+    remind, _ = _when(a.get("remind_at"))
+    if remind is None and due is not None and has_time:
+        remind = due
+    with SessionLocal() as db:
+        pid = _project_id(db, ctx.uid, a.get("project"))
+        t = create_task(db, ctx.uid, title, notes=str(a.get("notes", "")), due=due, due_time=has_time, remind_at=remind,
+                        priority=str(a.get("priority", "mid")), project_id=pid, source="agent")
+        out = task_out(t, a.get("project") or None)
+    ctx.ui.append({"action": "tasks_changed"})
+    return "Создана задача " + _fmt_task(out) + (f"; напоминание {remind:%d.%m %H:%M}" if remind else "")
+
+
+def _own(db, uid: str, tid) -> "Task":
+    from .db import Task
+    t = db.get(Task, str(tid or ""))
+    if not t or t.user_id != uid:
+        raise ToolError("задача не найдена — сначала найдите её через tasks_list")
+    return t
+
+
+async def _task_update(ctx: Ctx, a: dict) -> str:
+    from .db import now
+    from .tasks import task_out, to_utc
+    with SessionLocal() as db:
+        t = _own(db, ctx.uid, a.get("task_id"))
+        if a.get("title"):
+            t.title = " ".join(str(a["title"]).split())[:300]
+        if a.get("status") in ("todo", "doing", "done"):
+            if a["status"] == "done" and t.status != "done":
+                t.done_at = now()
+            t.status = a["status"]
+        if a.get("priority") in ("low", "mid", "high"):
+            t.priority = a["priority"]
+        if a.get("due"):
+            due, has_time = _when(a["due"])
+            t.due, t.due_time = to_utc(due), has_time
+        if a.get("remind_at"):
+            r, _ = _when(a["remind_at"])
+            t.remind_at, t.reminded = to_utc(r), False
+        if "project" in a:
+            t.project_id = _project_id(db, ctx.uid, a.get("project"))
+        t.updated = now()
+        db.commit()
+        out = task_out(t)
+    ctx.ui.append({"action": "tasks_changed"})
+    return "Обновлено: " + _fmt_task(out)
+
+
+async def _task_delete(ctx: Ctx, a: dict) -> str:
+    with SessionLocal() as db:
+        t = _own(db, ctx.uid, a.get("task_id"))
+        title = t.title
+        db.delete(t)
+        db.commit()
+    ctx.ui.append({"action": "tasks_changed"})
+    return f"Задача удалена: {title}"
+
+
+def _delete_text(ctx: Ctx, a: dict) -> str:
+    from .db import Task
+    with SessionLocal() as db:
+        t = db.get(Task, str(a.get("task_id", "")))
+        return f"Удалить задачу «{t.title}»" if t and t.user_id == ctx.uid else "Удалить задачу (не найдена)"
+
+
+async def _projects_list(ctx: Ctx, a: dict) -> str:
+    from .db import Project, Task
+    with SessionLocal() as db:
+        ps = db.scalars(select(Project).where(Project.user_id == ctx.uid)).all()
+        if not ps:
+            return "Проектов нет."
+        out = []
+        for p in ps:
+            ts = db.scalars(select(Task).where(Task.project_id == p.id)).all()
+            done = sum(t.status == "done" for t in ts)
+            out.append(f"[{p.id}] {p.name} ({p.status}): задач {len(ts)}, выполнено {done}")
+        return "\n".join(out)
+
+
+_DUE = {"type": "string", "description": "локальное время ГГГГ-ММ-ДДTЧЧ:ММ или дата ГГГГ-ММ-ДД; вычисляй от current_datetime"}
+
+
 TOOLS: dict[str, Tool] = {t.name: t for t in [
     Tool("current_datetime", "Текущие дата, время, день недели и часовой пояс пользователя. Вызывай для любых вопросов о сегодняшней дате, "
          "сроках, «завтра», «через неделю».", _obj({}), "read", _now, lambda a: "Узнаю дату и время"),
@@ -269,6 +410,30 @@ TOOLS: dict[str, Tool] = {t.name: t for t in [
     Tool("open_in_browser", "Показать пользователю страницу во встроенном браузере рядом с чатом.",
          _obj({"url": {"type": "string"}}, ["url"]), "read", _open_in_browser,
          lambda a: f"Открываю {_short(urllib.parse.urlparse(str(a.get('url', ''))).netloc, 40)}", cloud=True),
+    Tool("tasks_list", "Список задач пользователя. view: today (на сегодня и просроченные), upcoming, overdue, done, all. "
+         "Возвращает задачи с идентификаторами в квадратных скобках.",
+         _obj({"view": {"type": "string", "enum": ["today", "upcoming", "overdue", "done", "all"]},
+               "project": {"type": "string", "description": "название проекта (необязательно)"}}), "read", _tasks_list,
+         lambda a: {"today": "Смотрю задачи на сегодня", "upcoming": "Смотрю предстоящие задачи", "overdue": "Смотрю просроченные задачи",
+                    "done": "Смотрю выполненные задачи"}.get(a.get("view"), "Смотрю задачи")),
+    Tool("task_create", "Создать задачу. Если пользователь назвал время — укажи due; напоминание по умолчанию ставится на это время, "
+         "remind_at — если он просит напомнить в другое время. Сначала узнай текущую дату через current_datetime.",
+         _obj({"title": {"type": "string", "description": "что сделать, кратко, с заглавной буквы"}, "due": _DUE, "remind_at": _DUE,
+               "priority": {"type": "string", "enum": ["low", "mid", "high"]}, "project": {"type": "string"},
+               "notes": {"type": "string"}}, ["title"]), "write", _task_create,
+         lambda a: f"Создаю задачу: {_short(a.get('title', ''), 45)}"),
+    Tool("task_update", "Изменить задачу по идентификатору из tasks_list: название, срок, напоминание, приоритет, проект, "
+         "статус (todo / doing / done — «выполнено»).",
+         _obj({"task_id": {"type": "string"}, "title": {"type": "string"}, "status": {"type": "string", "enum": ["todo", "doing", "done"]},
+               "due": _DUE, "remind_at": _DUE, "priority": {"type": "string", "enum": ["low", "mid", "high"]},
+               "project": {"type": "string"}}, ["task_id"]), "write", _task_update,
+         lambda a: "Отмечаю задачу выполненной" if a.get("status") == "done" else "Изменяю задачу"),
+    Tool("task_delete", "Удалить задачу по идентификатору. Требует подтверждения пользователя. Для «сделано» используй task_update со status=done.",
+         _obj({"task_id": {"type": "string"}}, ["task_id"]), "confirm", _task_delete,
+         lambda a: "Удаляю задачу", confirm_text=_delete_text),
+    Tool("projects_list", "Проекты пользователя с числом задач и выполненных.", _obj({}), "read", _projects_list,
+         lambda a: "Смотрю проекты"),
+
 ]}
 
 

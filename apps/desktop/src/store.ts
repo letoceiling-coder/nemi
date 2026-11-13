@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { getToken, clearSession, api, Conv } from './api'
-import { tasks as seedTasks, Task, automations as seedAuto, Automation } from './data'
+import { automations as seedAuto, Automation } from './data'
+import { tasksApi, Task, Project, TaskInput, errText } from './tasks'
 
 export type Route = 'chat' | 'projects' | 'tasks' | 'calendar' | 'meetings' | 'mail' | 'browser' | 'automations' | 'knowledge' | 'reports' | 'integrations' | 'models' | 'activity' | 'settings'
 export type SettingsCat = 'general' | 'memory' | 'account' | 'security' | 'notifications' | 'storage' | 'integrations' | 'models' | 'activity' | 'updates' | 'diagnostics'
@@ -22,7 +23,9 @@ interface S {
   palette: boolean; setPalette: (v: boolean) => void
   toast?: string; notify: (t: string) => void
   messages: Msg[]; setMessages: (f: (m: Msg[]) => Msg[]) => void; newChat: () => void
-  tasks: Task[]; addTask: (title: string) => void; setTaskStatus: (id: string, st: Task['status']) => void
+  tasks: Task[]; projects: Project[]; loadTasks: () => Promise<void>
+  addTask: (title: string, extra?: Partial<TaskInput>) => Promise<Task | null>; setTaskStatus: (id: string, st: Task['status']) => void
+  updateTask: (id: string, p: Parameters<typeof tasksApi.update>[1]) => Promise<void>; removeTask: (id: string) => Promise<void>
   autos: Automation[]; toggleAuto: (id: string) => void
   emergency: boolean; setEmergency: (v: boolean) => void
   bg: Bg[]; addBg: (title: string, agent: string) => void; tickBg: () => void; cancelBg: (id: string) => void
@@ -45,9 +48,25 @@ export const useApp = create<S>((set, get) => ({
   palette: false, setPalette: palette => set({ palette }),
   toast: undefined, notify: toast => { set({ toast }); clearTimeout(timer); timer = setTimeout(() => set({ toast: undefined }), 2600) },
   messages: [], setMessages: f => set(s => ({ messages: f(s.messages) })), newChat: () => set({ messages: [], route: 'chat', browserOpen: false, convId: undefined }),
-  tasks: seedTasks,
-  addTask: title => set(s => ({ tasks: [{ id: 't' + Date.now(), title, project: 'Входящие', due: 'Без срока', priority: 'mid', status: 'todo' }, ...s.tasks] })),
-  setTaskStatus: (id, status) => set(s => ({ tasks: s.tasks.map(t => t.id === id ? { ...t, status } : t) })),
+  tasks: [], projects: [],
+  loadTasks: async () => {
+    try { const [tasks, projects] = await Promise.all([tasksApi.list(), tasksApi.projects()]); set({ tasks, projects }) }
+    catch { /* backend not ready — keep what we have */ }
+  },
+  // quick input: «завтра в 11:00 проверить договор» -> date and reminder are parsed on the server
+  addTask: async (title, extra = {}) => {
+    try { const t = await tasksApi.create({ title, quick: !extra.due, ...extra }); await get().loadTasks(); return t }
+    catch (e) { get().notify(errText(e)); return null }
+  },
+  setTaskStatus: (id, status) => {
+    set(s => ({ tasks: s.tasks.map(t => t.id === id ? { ...t, status } : t) }))      // optimistic
+    tasksApi.update(id, { status }).then(() => get().loadTasks()).catch(e => { get().notify(errText(e)); get().loadTasks() })
+  },
+  updateTask: async (id, p) => { try { await tasksApi.update(id, p); await get().loadTasks() } catch (e) { get().notify(errText(e)) } },
+  removeTask: async id => {
+    set(s => ({ tasks: s.tasks.filter(t => t.id !== id) }))
+    try { await tasksApi.remove(id) } catch (e) { get().notify(errText(e, 'Не удалось удалить')) } finally { get().loadTasks() }
+  },
   autos: seedAuto, toggleAuto: id => set(s => ({ autos: s.autos.map(a => a.id === id ? { ...a, enabled: !a.enabled } : a) })),
   emergency: false, setEmergency: emergency => set({ emergency }),
   bg: [

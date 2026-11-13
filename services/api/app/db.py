@@ -1,7 +1,7 @@
 from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Float, ForeignKey, String, Text, create_engine, event
+from sqlalchemy import Boolean, Float, ForeignKey, String, Text, create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 from .config import settings
 
@@ -73,6 +73,37 @@ class MemoryFact(Base):
     embedding: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list[float]; None if embeddings unavailable
     created: Mapped[datetime] = mapped_column(default=now)
     updated: Mapped[datetime] = mapped_column(default=now)
+
+
+class Project(Base):
+    __tablename__ = "projects"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=uid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    description: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(10), default="active")     # active | paused | done
+    color: Mapped[str] = mapped_column(String(9), default="#d98a5f")
+    created: Mapped[datetime] = mapped_column(default=now)
+
+
+class Task(Base):
+    """Times are UTC. due_time=False means "some time that day" (due holds 23:59 local)."""
+    __tablename__ = "tasks"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=uid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(300))
+    notes: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(10), default="todo")       # todo | doing | done
+    priority: Mapped[str] = mapped_column(String(6), default="mid")       # low | mid | high
+    due: Mapped[datetime | None] = mapped_column(nullable=True, index=True)
+    due_time: Mapped[bool] = mapped_column(Boolean, default=False)
+    remind_at: Mapped[datetime | None] = mapped_column(nullable=True, index=True)
+    reminded: Mapped[bool] = mapped_column(Boolean, default=False)
+    source: Mapped[str] = mapped_column(String(20), default="manual")     # manual | agent
+    created: Mapped[datetime] = mapped_column(default=now)
+    updated: Mapped[datetime] = mapped_column(default=now)
+    done_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
 
 class SpendEntry(Base):

@@ -23,6 +23,7 @@ import { SettingsPage } from './pages/Settings'
 import { RightPanel } from './components/RightPanel'
 import { Resizer, usePanelWidth } from './components/Resizer'
 import { useUpdates, startAutoCheck, justUpdatedTo } from './updates'
+import { startReminders, isToday, fmtDue } from './tasks'
 import { Palette } from './components/Palette'
 import { Auth } from './components/Auth'
 import { api, userKey } from './api'
@@ -30,7 +31,7 @@ import { api, userKey } from './api'
 const nav: { id: Route; label: string; icon: typeof Mail; badge?: number }[] = [
   { id: 'chat', label: 'Ассистент', icon: MessageSquare },
   { id: 'projects', label: 'Проекты', icon: FolderKanban },
-  { id: 'tasks', label: 'Задачи', icon: CheckSquare, badge: 3 },
+  { id: 'tasks', label: 'Задачи', icon: CheckSquare },
   { id: 'calendar', label: 'Календарь', icon: CalendarDays },
   { id: 'meetings', label: 'Встречи', icon: Mic },
   { id: 'mail', label: 'Почта', icon: Mail, badge: 3 },
@@ -43,8 +44,10 @@ const nav2: typeof nav = [
   { id: 'settings', label: 'Настройки', icon: Settings },
 ]
 
-function NavItem({ item, collapsed }: { item: (typeof nav)[number]; collapsed: boolean }) {
-  const { route, go } = useApp()
+function NavItem({ item: raw, collapsed }: { item: (typeof nav)[number]; collapsed: boolean }) {
+  const { route, go, tasks } = useApp()
+  // live counter: open tasks due today or overdue
+  const item = raw.id === 'tasks' ? { ...raw, badge: tasks.filter(t => t.status !== 'done' && isToday(t)).length || undefined } : raw
   const Icon = item.icon
   const active = route === item.id
   return (
@@ -210,6 +213,11 @@ function Shell() {
   const { route, rightPanel, setPalette, toast, sidebar, tickBg } = useApp()
   useEffect(() => { const t = setInterval(tickBg, 1000); return () => clearInterval(t) }, [tickBg])
   useEffect(() => startAutoCheck(), [])
+  useEffect(() => {
+    useApp.getState().loadTasks()
+    // reminders: Windows notification + toast; the list is refreshed so the bell disappears
+    return startReminders(t => { useApp.getState().notify(`Напоминание: ${t.title}${t.due ? ` — ${fmtDue(t)}` : ''}`); useApp.getState().loadTasks() })
+  }, [])
   useEffect(() => { justUpdatedTo().then(v => { if (v) useApp.getState().notify(`NEMI обновлён до версии ${v}`) }) }, [])
   useEffect(() => {
     // автоблокировка по бездействию (минуты в localStorage, 0 = выкл.)

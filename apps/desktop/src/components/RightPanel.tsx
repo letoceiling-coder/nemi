@@ -1,4 +1,5 @@
 import { useApp } from '../store'
+import { fmtDue, isOverdue, isToday } from '../tasks'
 import { Resizer, usePanelWidth } from './Resizer'
 import { meetings, agents } from '../data'
 import { Badge, Progress } from '../ui'
@@ -19,7 +20,8 @@ function Block({ title, children, onMore }: { title: string; children: React.Rea
 export function RightPanel() {
   const { tasks, setTaskStatus, go, emergency, bg } = useApp()
   const live = bg.filter(b => b.status !== 'cancel').slice(0, 3)
-  const today = tasks.filter(t => t.status !== 'done').slice(0, 4)
+  const open = tasks.filter(t => t.status !== 'done')
+  const today = [...open.filter(isToday), ...open.filter(t => !isToday(t))].slice(0, 5)
   const pw = usePanelWidth('right', 288, 240, 520)
   return (
     <>
@@ -34,12 +36,12 @@ export function RightPanel() {
                 <CheckCircle2 size={15} className="mt-0.5 hidden shrink-0 text-ok group-hover:block" />
                 <span className="min-w-0">
                   <span className="block truncate text-[13px]">{t.title}</span>
-                  <span className="text-[11.5px] text-fg3">{t.due}</span>
+                  <span className={isOverdue(t) ? 'text-[11.5px] text-err' : 'text-[11.5px] text-fg3'}>{fmtDue(t)}</span>
                 </span>
               </button>
             </li>
           ))}
-          {today.length === 0 && <li className="px-1.5 text-fg3">Всё выполнено 🎉</li>}
+          {today.length === 0 && <li className="px-1.5 text-fg3">Открытых задач нет</li>}
         </ul>
       </Block>
       <Block title="Фоновые задачи" onMore={() => go('activity')}>

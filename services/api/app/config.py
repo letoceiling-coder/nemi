@@ -34,6 +34,15 @@ class Settings(BaseSettings):
         # final reports, hard analysis (rare) — 0.10/0.50, 1M context
         "deep": ["anthropic/claude-haiku-5.5", "moonshotai/kimi-k2.5", "deepseek/deepseek-v3.2"],
     }
+    # Chat fallback when the own server is busy or down: free models first, then a cheap paid one (by measurement)
+    # Measured 2026-11-13 (6 requests each): nemotron-3-ultra 6/6 ~1.9s, ernie-5.5-flash 6/6 ~1.8s, openrouter/free 5/6
+    # (routes to random free models, some tiny); gemma-4 :free 0/6 (429 upstream), inkling 403 (region).
+    chat_free_models: list[str] = ["nvidia/nemotron-3-ultra-550b-a55b:free", "baidu/ernie-5.5-flash-preview:free", "openrouter/free"]
+    chat_paid_models: list[str] = ["google/gemini-2.5-flash-lite", "deepseek/deepseek-v3.2"]
+    first_token_own: float = 25.0        # s the own server has to start answering (else: busy -> next route)
+    first_token_cloud: float = 20.0
+    cooldown_failed: float = 60.0        # s a failed route is skipped
+    cooldown_rate_limited: float = 300.0  # s after HTTP 429
     openrouter_monthly_limit: float = 10.0   # USD; default, changeable in Settings (0 = no limit)
     embedding_model: str = "baai/bge-m3"    # multilingual, 8k context
     request_timeout: float = 60.0

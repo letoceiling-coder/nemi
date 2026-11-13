@@ -15,6 +15,7 @@ from . import storage
 from .auth import current_user, hash_password, make_token, verify_password
 from .config import settings
 from . import agent, budget, logs, memory
+from . import tasks as tasks_mod
 from .db import AuditLog, Conversation, MemoryFact, Message, SessionLocal, User, audit, init_db, now
 from .providers import ModelRouter, ProviderError
 from .secrets import KNOWN, delete_secret, secrets_status, set_secret
@@ -39,6 +40,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Personal AI Assistant API", version="0.2.0", lifespan=lifespan)
+app.include_router(tasks_mod.router)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["*"], allow_headers=["*"])
 
 
