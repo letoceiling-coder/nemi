@@ -95,8 +95,8 @@ function Sidebar() {
   return (
     <aside className={clsx('flex shrink-0 flex-col border-r border-line bg-surface transition-[width] duration-200', c ? 'w-[56px]' : 'w-[248px]')}>
       <div className="flex h-12 items-center gap-2 px-3">
-        <div className="grid size-7 shrink-0 place-items-center rounded-lg bg-accent text-[13px] font-bold text-accentfg">Ф</div>
-        {!c && <span className="font-semibold tracking-tight">Фокус</span>}
+        <div className="grid size-7 shrink-0 place-items-center rounded-lg bg-accent text-[13px] font-bold text-accentfg">N</div>
+        {!c && <span className="font-semibold tracking-tight">NEMI</span>}
       </div>
       <div className="space-y-1 px-2">
         <button onClick={newChat} title="Новый диалог" className={clsx('flex h-9 w-full items-center gap-2 rounded-lg border border-line bg-surface2 px-2.5 text-[13.5px] font-medium transition-colors hover:bg-surface3', c && 'justify-center px-0')}>

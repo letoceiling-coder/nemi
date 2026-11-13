@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Фокус",
+  "productName": "NEMI",
   "version": "0.1.0",
-  "identifier": "ru.siteaccess.focus",
+  "identifier": "ru.siteaccess.nemi",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:5173",
@@ -11,7 +11,15 @@
   },
   "app": {
     "windows": [
-      { "label": "main", "title": "Фокус", "width": 1360, "height": 860, "minWidth": 1000, "minHeight": 640, "center": true }
+      {
+        "label": "main",
+        "title": "NEMI",
+        "width": 1360,
+        "height": 860,
+        "minWidth": 1000,
+        "minHeight": 640,
+        "center": true
+      }
     ],
     "security": {
       "csp": "default-src 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' http://127.0.0.1:8731 http://localhost:8731 ws://localhost:5173; frame-src https:"
@@ -19,8 +27,30 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "msi"],
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
-    "windows": { "nsis": { "installMode": "currentUser", "languages": ["Russian", "English"] } }
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "Russian",
+          "English"
+        ],
+        "displayLanguageSelector": false
+      }
+    },
+    "resources": {
+      "../../../services/api/dist/nemi-api/": "api/"
+    },
+    "publisher": "SiteAccess",
+    "shortDescription": "NEMI — персональный AI-ассистент"
   }
 }

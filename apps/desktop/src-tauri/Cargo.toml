@@ -1,11 +1,11 @@
 [package]
-name = "focus"
+name = "nemi"
 version = "0.1.0"
-description = "Personal AI Assistant"
+description = "NEMI — personal AI assistant"
 edition = "2021"
 
 [lib]
-name = "focus_lib"
+name = "nemi_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -21,3 +21,6 @@ opt-level = "s"
 lto = true
 codegen-units = 1
 strip = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }

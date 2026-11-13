@@ -19,3 +19,6 @@ data/
 *.sqlite
 
 **/src-tauri/gen/
+# PyInstaller (services/api/build_sidecar.ps1)
+services/api/build/
+services/api/*.spec

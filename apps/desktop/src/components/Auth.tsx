@@ -31,8 +31,8 @@ export function Auth() {
     <div className="grid h-full place-items-center overflow-y-auto bg-bg px-4 py-8">
       <div className="anim-in w-full max-w-[380px]">
         <div className="mb-6 text-center">
-          <div className="mx-auto mb-3 grid size-12 place-items-center rounded-2xl bg-accent text-[20px] font-bold text-accentfg">Ф</div>
-          <h1 className="text-[22px] font-semibold tracking-tight">{mode === 'login' ? 'Вход в Фокус' : 'Создать аккаунт'}</h1>
+          <div className="mx-auto mb-3 grid size-12 place-items-center rounded-2xl bg-accent text-[20px] font-bold text-accentfg">N</div>
+          <h1 className="text-[22px] font-semibold tracking-tight">{mode === 'login' ? 'Вход в NEMI' : 'Создать аккаунт'}</h1>
           <p className="mt-1 text-fg3">{mode === 'login' ? 'Введите почту и пароль' : 'Данные аккаунта хранятся только на этом компьютере'}</p>
         </div>
         <div className="mb-3 flex justify-center"><Tabs value={mode} onChange={m => { setMode(m); setErr('') }} items={[{ id: 'login', label: 'Вход' }, { id: 'signup', label: 'Регистрация' }]} /></div>

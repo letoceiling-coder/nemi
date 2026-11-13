@@ -59,7 +59,7 @@ export function ProjectsPage() {
         ))}
       </div>
       {list.length === 0 && <div className="px-8 py-10 text-center text-fg3">Ничего не найдено. Измените запрос или фильтр.</div>}
-      <div className="px-8 pt-8"><Section title="Последние решения">{decisions.map(d => <div key={d.text} className="flex items-center gap-3 border-b border-line py-2.5 last:border-0"><Avatar name="Фокус" size={22} /><span className="flex-1">{d.text}</span><span className="text-[12px] text-fg3">{d.src}</span></div>)}</Section></div>
+      <div className="px-8 pt-8"><Section title="Последние решения">{decisions.map(d => <div key={d.text} className="flex items-center gap-3 border-b border-line py-2.5 last:border-0"><Avatar name="NEMI" size={22} /><span className="flex-1">{d.text}</span><span className="text-[12px] text-fg3">{d.src}</span></div>)}</Section></div>
     </Page>
   )
 }
