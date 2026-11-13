@@ -22,3 +22,4 @@ data/
 # PyInstaller (services/api/build_sidecar.ps1)
 services/api/build/
 services/api/*.spec
+release/
