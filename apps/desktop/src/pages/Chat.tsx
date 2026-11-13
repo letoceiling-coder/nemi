@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
-import { ArrowUp, Paperclip, Mic, Square, ChevronDown, Copy, RotateCw, Check, Loader2, AlertCircle, Circle, Sparkles, Pencil, X, ChevronRight, ShieldCheck, Globe, FileText, FileSpreadsheet, File as FileIcon, Mail, CalendarCheck, BarChart3, FolderKanban, Mic as MicI, UploadCloud, Brain } from 'lucide-react'
+import { ArrowUp, Paperclip, Mic, Square, ChevronDown, Copy, RotateCw, Check, Loader2, AlertCircle, Circle, Sparkles, Pencil, X, ChevronRight, ShieldCheck, Globe, FileText, FileSpreadsheet, File as FileIcon, CalendarCheck, CalendarPlus, History, BarChart3, FolderKanban, UploadCloud, Brain } from 'lucide-react'
 import { useApp, Approval, Msg, Step, Att } from '../store'
 import { BrowserView } from '../components/BrowserView'
 import { Resizer, usePanelWidth } from '../components/Resizer'
@@ -8,7 +8,22 @@ import { api, chatStream, getPref, setPref, ProviderModels, getAutoMemory, Budge
 import { IconButton, Button, Badge } from '../ui'
 
 const fmtSize = (n: number) => n > 1048576 ? (n / 1048576).toFixed(1) + ' МБ' : Math.max(1, Math.round(n / 1024)) + ' КБ'
-const toAtt = (f: File): Att => ({ name: f.name, size: f.size, type: f.type, url: f.type.startsWith('image/') ? URL.createObjectURL(f) : undefined })
+const toAtt = (f: File): Att => ({ name: f.name, size: f.size, type: f.type, url: f.type.startsWith('image/') ? URL.createObjectURL(f) : undefined, file: f })
+const b64 = (f: File) => new Promise<string>((ok, bad) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',', 2)[1] ?? ''); r.onerror = () => bad(r.error); r.readAsDataURL(f) })
+/** The text of attached documents goes to the assistant inside the message (after a marker the server knows). */
+async function attachText(atts: Att[]): Promise<{ text: string; skipped: string[] }> {
+  let text = ''
+  const skipped: string[] = []
+  for (const a of atts) {
+    if (a.type.startsWith('image/')) { skipped.push(`${a.name} — изображения ассистент пока не распознаёт`); continue }
+    if (!a.file) { skipped.push(`${a.name} — файл недоступен, прикрепите заново`); continue }
+    try {
+      const r = await api.extract(a.name, await b64(a.file))
+      text += `\n\n[Вложение: ${a.name}${r.truncated ? `, первые ${r.text.length} из ${r.chars} символов` : ''}]\n${r.text}`
+    } catch (e) { skipped.push(`${a.name} — ${e instanceof Error ? e.message : 'не прочитан'}`) }
+  }
+  return { text, skipped }
+}
 function fileIcon(a: Att) {
   if (/sheet|excel|csv/.test(a.type) || /\.(xlsx?|csv)$/i.test(a.name)) return <FileSpreadsheet size={18} />
   if (/pdf|word|text/.test(a.type) || /\.(pdf|docx?|txt|md)$/i.test(a.name)) return <FileText size={18} />
@@ -106,15 +121,15 @@ function ApprovalCard({ a, onAnswer }: { a: Approval; onAnswer: (ok: boolean) =>
 
 const cards = [
   { icon: CalendarCheck, t: 'Что сегодня нужно сделать?', d: 'План дня по задачам и встречам' },
-  { icon: Mail, t: 'Проверь почту', d: 'Важные письма и готовые ответы' },
-  { icon: FolderKanban, t: 'Проверь мои проекты', d: 'Статусы, риски и просрочки' },
-  { icon: BarChart3, t: 'Подготовь отчёт', d: 'Сводка за неделю в PDF или DOCX' },
-  { icon: MicI, t: 'Проанализируй последнюю встречу', d: 'Решения, задачи, протокол' },
+  { icon: CalendarPlus, t: 'Запланируй созвон завтра в 15:00', d: 'Событие в календаре с напоминанием' },
+  { icon: FolderKanban, t: 'Какие задачи просрочены по проектам?', d: 'Статусы и сроки по проектам' },
+  { icon: History, t: 'Что мы обсуждали на прошлой неделе?', d: 'Поиск по всей истории' },
+  { icon: BarChart3, t: 'Подведи итоги недели', d: 'Сделанные задачи и встречи' },
   { icon: Globe, t: 'Найди в интернете новости про ИИ', d: 'Откроет встроенный браузер' },
 ]
 
 export default function ChatPage() {
-  const { messages, setMessages, emergency, notify, browserOpen, openBrowser, closeBrowser, addBg } = useApp()
+  const { messages, setMessages, emergency, notify, browserOpen, openBrowser, closeBrowser } = useApp()
   const bw = usePanelWidth('browser', 520, 320, 1400)
   const split = useRef<HTMLDivElement>(null)
   // the chat keeps at least 360px: the browser can't be dragged wider than the space actually left
@@ -124,7 +139,6 @@ export default function ChatPage() {
   const [pm, setPm] = useState<ProviderModels[]>([])
   const [model, setModel] = useState(getPref().model || 'Авто')
   const [menu, setMenu] = useState(false)
-  const [rec, setRec] = useState(false)
   const [files, setFiles] = useState<Att[]>([])
   const [drag, setDrag] = useState(false)
   const [light, setLight] = useState<Att | null>(null)
@@ -172,9 +186,15 @@ export default function ChatPage() {
     const ac = new AbortController(); abort.current = ac
     const steps: Step[] = [{ label: 'Выбираю модель', tool: 'Model Router', status: 'active' }]
     setMessages(ms => [...ms, { id: 'u' + Date.now(), role: 'user', text, files: atts.length ? atts : undefined }, { id, role: 'assistant', text: '', steps, running: true }])
-    const doc = atts.find(a => !a.type.startsWith('image/'))
-    if (doc) addBg(`Индексация: ${doc.name}`, 'Knowledge Agent')
     setVal(''); setFiles([])
+    let message = q
+    if (atts.length) {
+      patch(id, m => ({ ...m, steps: [{ label: `Читаю вложения: ${atts.length}`, tool: 'Файлы', status: 'active' }] }))
+      const { text: att, skipped } = await attachText(atts)
+      if (skipped.length) notify(`Не прочитано: ${skipped.join('; ')}`)
+      if (!att && !text.trim()) { patch(id, m => ({ ...m, running: false, steps: [], error: 'Ни один файл не удалось прочитать' })); return }
+      message = (text.trim() || 'Посмотри вложенные файлы') + att
+    }
     const pref = getPref()
     let acc = ''
     let recalled = 0
@@ -187,7 +207,7 @@ export default function ChatPage() {
       patch(id, m => ({ ...m, steps: [...base, ...tools, final] }))
     }
     const finish = () => patch(id, m => m.running ? { ...m, running: false, steps: m.steps?.map(s => ({ ...s, status: s.status === 'error' ? s.status : 'done' as const })) } : m)
-    for await (const ev of chatStream({ message: q, conversation_id: useApp.getState().convId, model: pref.model, prefer: pref.provider, remember: getAutoMemory() }, ac.signal)) {
+    for await (const ev of chatStream({ message, conversation_id: useApp.getState().convId, model: pref.model, prefer: pref.provider, remember: getAutoMemory() }, ac.signal)) {
       // memory arrives after the answer; it belongs to this message even if the user already sent the next one
       if (ev.type === 'memory') { patch(id, m => ({ ...m, memory: ev.added })); continue }
       if (ev.type === 'budget') { budgetNotice(ev, notify); continue }
@@ -235,7 +255,7 @@ export default function ChatPage() {
           </div>
         )}
         <textarea
-          value={val} rows={1} placeholder={drag ? 'Отпустите, чтобы прикрепить файлы' : rec ? 'Слушаю…' : 'Поставьте задачу обычным языком…'}
+          value={val} rows={1} placeholder={drag ? 'Отпустите, чтобы прикрепить файлы' : 'Поставьте задачу обычным языком…'}
           onChange={e => { setVal(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 180) + 'px' }}
           onPaste={onPaste}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); editing ? submitEdit(editing) : send(val) } }}
@@ -259,7 +279,6 @@ export default function ChatPage() {
             )}
           </div>
           <div className="flex-1" />
-          <IconButton label="Голосовой ввод" active={rec} onClick={() => { setRec(r => !r); if (!rec) notify('Голосовой ввод появится в следующей версии') }} className={rec ? '!text-err' : ''}><Mic size={16} /></IconButton>
           {busy
             ? <button onClick={stop} aria-label="Остановить" className="grid size-8 place-items-center rounded-lg bg-fg text-bg"><Square size={13} fill="currentColor" /></button>
             : <button onClick={() => editing ? submitEdit(editing) : send(val)} disabled={!canSend} aria-label="Отправить" className="grid size-8 place-items-center rounded-lg bg-accent text-accentfg transition disabled:opacity-30"><ArrowUp size={16} /></button>}

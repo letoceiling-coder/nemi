@@ -38,6 +38,7 @@ input:focus, textarea:focus, select:focus { outline: none; }
 .anim-in { animation: fadeUp .25s ease both; }
 .pulse { animation: pulseDot 1.4s ease-in-out infinite; }
 .spin { animation: spin 1s linear infinite; }
+html[data-motion='off'] *, html[data-motion='off'] ::before, html[data-motion='off'] ::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
 @media (prefers-reduced-motion: reduce) { *, ::before, ::after { animation-duration: .001ms !important; transition-duration: .001ms !important; } }
 .prose-chat p { margin: .5em 0; } .prose-chat ul { margin: .5em 0; padding-left: 1.2em; list-style: disc; } .prose-chat li { margin: .2em 0; }
 .prose-chat strong { font-weight: 600; } .prose-chat code { font-family: var(--font-mono); font-size: 12.5px; background: var(--surface-3); padding: 1px 5px; border-radius: 5px; }

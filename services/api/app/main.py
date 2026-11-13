@@ -15,7 +15,7 @@ from . import storage
 from .auth import current_user, hash_password, make_token, verify_password
 from .config import settings
 from . import agent, budget, logs, memory
-from . import calsync
+from . import archive, backup, calsync, files
 from . import events as events_mod
 from . import tasks as tasks_mod
 from .db import AuditLog, Conversation, MemoryFact, Message, SessionLocal, User, audit, init_db, now
@@ -36,17 +36,24 @@ _fails: dict[str, list[float]] = {}
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     logs.setup_logging()
+    if aside := backup.apply_pending_restore():
+        log.warning("restored from backup; previous database kept as %s", aside)
     init_db()
     log.info("backend %s started, data_dir=%s", app.version, settings.data_dir)
     sync_task = asyncio.create_task(calsync.loop())    # Google / Yandex import every 5 min (only if connected)
+    backup_task = asyncio.create_task(backup.loop())   # whole database to S3 once a day
     yield
     sync_task.cancel()
+    backup_task.cancel()
 
 
 app = FastAPI(title="Personal AI Assistant API", version="0.6.1", lifespan=lifespan)
 app.include_router(tasks_mod.router)
 app.include_router(events_mod.router)
 app.include_router(calsync.router)
+app.include_router(archive.router)
+app.include_router(backup.router)
+app.include_router(files.router)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -206,8 +213,11 @@ def model_settings_put(b: ModelSettingsIn, uid: str = Depends(current_user), db:
 
 
 # ---------- assistant ----------
+ATTACH_MARK = "\n\n[Вложение: "   # the app appends attached files' text after this marker
+
+
 class ChatIn(BaseModel):
-    message: str = Field(min_length=1, max_length=20000)
+    message: str = Field(min_length=1, max_length=200000)   # attached files' text is part of the message
     conversation_id: str | None = None
     model: str | None = None
     prefer: str | None = None   # provider name, e.g. "openrouter"
@@ -277,12 +287,13 @@ def _with_tools(m: Message) -> str:
 
 @app.post("/api/v1/assistant/chat")
 async def chat(b: ChatIn, uid: str = Depends(current_user)):
+    own_text = b.message.split(ATTACH_MARK, 1)[0].strip() or "вложенные файлы"   # memory looks only at what the user typed
     with SessionLocal() as db:
         conv = db.get(Conversation, b.conversation_id) if b.conversation_id else None
         if conv and conv.user_id != uid:
             raise HTTPException(404, "Диалог не найден")
         if not conv:
-            conv = Conversation(user_id=uid, title=b.message.strip()[:60])
+            conv = Conversation(user_id=uid, title=own_text[:60])
             db.add(conv)
             db.commit()
         db.add(Message(conv_id=conv.id, user_id=uid, role="user", content=b.message))
@@ -292,7 +303,7 @@ async def chat(b: ChatIn, uid: str = Depends(current_user)):
         cid = conv.id
         private = budget.private_only(uid)
         try:
-            facts = await memory.recall(db, router_models, uid, b.message, private=private or b.prefer == "siteaccess")
+            facts = await memory.recall(db, router_models, uid, own_text, private=private or b.prefer == "siteaccess")
         except Exception:  # noqa: BLE001 — memory must never break the chat
             log.warning("memory recall failed", exc_info=True)
             facts = []
@@ -306,7 +317,7 @@ async def chat(b: ChatIn, uid: str = Depends(current_user)):
             yield ev({"type": "recall", "count": len(facts)})
         meta, failed, res = {}, "", {}
         async for e in agent.stream_agent(router_models, uid, messages, res, model=b.model, prefer=b.prefer,
-                                          only="siteaccess" if private else None, private=private):
+                                          only="siteaccess" if private else None, private=private, conv_id=cid):
             if e["type"] == "meta":
                 meta = {k: v for k, v in e.items() if k != "type"}
                 if e.get("fallback"):
@@ -336,7 +347,7 @@ async def chat(b: ChatIn, uid: str = Depends(current_user)):
                     with SessionLocal() as db:
                         # the turn stayed on the own server -> extraction stays there as well
                         added = await asyncio.wait_for(memory.remember(
-                            db, router_models, uid, cid, b.message, private=private or meta.get("provider") == "siteaccess"), 25)
+                            db, router_models, uid, cid, own_text, private=private or meta.get("provider") == "siteaccess"), 25)
                         if added:
                             audit(db, uid, "memory.auto", f"{len(added)} fact(s)")   # no fact text in the audit log
                 except Exception:  # noqa: BLE001 — timeout / provider issues: answer is already delivered
@@ -439,3 +450,20 @@ def memory_clear(uid: str = Depends(current_user), db: Session = Depends(get_db)
 @app.get("/api/v1/storage/health")
 def storage_health(uid: str = Depends(current_user)):
     return storage.health(S3)
+
+
+@app.get("/api/v1/storage/usage")
+async def storage_usage(uid: str = Depends(current_user)):
+    try:
+        return {"ok": True, "bucket": S3.bucket, "endpoint": settings.s3_endpoint, **await asyncio.to_thread(storage.usage, S3)}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "bucket": S3.bucket, "endpoint": settings.s3_endpoint, "error": type(e).__name__}
+
+
+@app.get("/api/v1/assistant/tools")
+def assistant_tools(uid: str = Depends(current_user)):
+    """What the assistant can do and with which permission level (shown in «Безопасность»)."""
+    from . import tools as T
+    private = budget.private_only(uid)
+    return [{"name": t.name, "description": t.description.split(". ")[0], "risk": t.risk, "cloud": t.cloud,
+             "enabled": not (private and t.cloud)} for t in T.TOOLS.values()]

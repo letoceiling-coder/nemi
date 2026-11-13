@@ -8,6 +8,8 @@ $py = '.venv\Scripts\python.exe'
   --hidden-import keyring.backends.Windows `
   --collect-submodules uvicorn `
   --collect-data botocore `
+  --collect-data docx `
+  --hidden-import pypdf `
   --exclude-module pytest --exclude-module tkinter
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed ($LASTEXITCODE)" }
 Write-Host "OK: $PSScriptRoot\dist\nemi-api\nemi-api.exe"

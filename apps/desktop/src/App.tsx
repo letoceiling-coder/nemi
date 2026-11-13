@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react'
 import clsx from 'clsx'
 import {
   MessageSquare, FolderKanban, CheckSquare, CalendarDays, Mic, Mail, Globe, Workflow, BookOpen, BarChart3, Plug, Cpu, Settings, Activity,
-  PanelLeft, PanelRight, Plus, Search, Sun, Moon, OctagonX, Lock, Loader2, X, Check, ArrowUpCircle,
+  PanelLeft, PanelRight, Plus, Search, Sun, Moon, OctagonX, Lock, Loader2, X, Check, ArrowUpCircle, Archive, ShieldCheck,
 } from 'lucide-react'
 import { useApp, Route } from './store'
-import { Kbd, IconButton, Progress } from './ui'
+import { Kbd, IconButton } from './ui'
 import ChatPage from './pages/Chat'
 import { ProjectsPage } from './pages/Projects'
 import { TasksPage } from './pages/Tasks'
@@ -19,6 +19,9 @@ import { ReportsPage } from './pages/Reports'
 import { IntegrationsPage } from './pages/Integrations'
 import { ModelsPage } from './pages/Models'
 import { ActivityPage } from './pages/Activity'
+import { ArchivePage } from './pages/Archive'
+import { useLive, startLive, archiveApi, fmtAt } from './archive'
+import { errText } from './tasks'
 import { SettingsPage } from './pages/Settings'
 import { RightPanel } from './components/RightPanel'
 import { Resizer, usePanelWidth } from './components/Resizer'
@@ -35,11 +38,12 @@ const nav: { id: Route; label: string; icon: typeof Mail; badge?: number }[] = [
   { id: 'tasks', label: 'Задачи', icon: CheckSquare },
   { id: 'calendar', label: 'Календарь', icon: CalendarDays },
   { id: 'meetings', label: 'Встречи', icon: Mic },
-  { id: 'mail', label: 'Почта', icon: Mail, badge: 3 },
+  { id: 'mail', label: 'Почта', icon: Mail },
   { id: 'browser', label: 'Браузер', icon: Globe },
   { id: 'automations', label: 'Автоматизации', icon: Workflow },
   { id: 'knowledge', label: 'База знаний', icon: BookOpen },
   { id: 'reports', label: 'Отчёты', icon: BarChart3 },
+  { id: 'archive', label: 'Архив', icon: Archive },
 ]
 const nav2: typeof nav = [
   { id: 'settings', label: 'Настройки', icon: Settings },
@@ -128,32 +132,35 @@ function Sidebar() {
 }
 
 
-function BgButton() {
-  const { bg, cancelBg, go } = useApp()
+/** What the assistant is doing right now (real runs from the server); approvals can be answered from here. */
+function AssistantChip() {
+  const data = useLive(s => s.data)
+  const { go, notify } = useApp()
   const [open, setOpen] = useState(false)
-  const run = bg.filter(b => b.status === 'run' || b.status === 'queued')
-  const shown = bg.filter(b => b.status !== 'cancel')
+  const runs = data?.runs ?? []
+  const asks = runs.flatMap(r => r.approvals.map(a => ({ ...a, run: r.id })))
+  const decide = async (run: string, id: string, ok: boolean) => { try { await archiveApi.approve(run, id, ok); notify(ok ? 'Разрешено' : 'Отклонено') } catch (e) { notify(errText(e)) } }
   return (
     <div className="relative">
-      <button onClick={() => setOpen(o => !o)} className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12.5px] text-fg2 hover:bg-surface2" title="Фоновые задачи">
-        {run.length ? <Loader2 size={14} className="spin text-accent" /> : <Check size={14} className="text-ok" />}
-        <span className="hidden whitespace-nowrap sm:inline">{run.length ? `${run.length} в фоне` : 'Фон'}</span>
+      <button onClick={() => setOpen(o => !o)} className={clsx('flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12.5px] hover:bg-surface2', asks.length ? 'text-warn' : 'text-fg2')} title="Что делает ассистент">
+        {asks.length ? <ShieldCheck size={14} /> : runs.length ? <Loader2 size={14} className="spin text-accent" /> : <Check size={14} className="text-ok" />}
+        <span className="hidden whitespace-nowrap sm:inline">{asks.length ? 'Ждёт решения' : runs.length ? 'Работает' : 'Свободен'}</span>
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="anim-in absolute right-0 top-10 z-40 w-[340px] rounded-xl border border-line2 bg-surface p-3" style={{ boxShadow: 'var(--shadow)' }}>
-            <div className="mb-2 flex items-center justify-between"><span className="text-[12px] font-medium uppercase tracking-wider text-fg3">Фоновые задачи</span><button className="text-[12px] text-fg3 hover:text-fg" onClick={() => { setOpen(false); go('activity') }}>Журнал</button></div>
-            <ul className="max-h-[320px] space-y-3 overflow-y-auto">
-              {shown.map(b => (
-                <li key={b.id}>
-                  <div className="flex items-center gap-2 text-[13px]"><span className="min-w-0 flex-1 truncate">{b.title}</span>
-                    {b.status === 'done' ? <Check size={14} className="text-ok" /> : <button aria-label="Отменить" onClick={() => cancelBg(b.id)} className="text-fg3 hover:text-err"><X size={13} /></button>}</div>
-                  <div className="mb-1 text-[11.5px] text-fg3">{b.agent} · {b.status === 'queued' ? 'в очереди' : b.status === 'done' ? 'готово' : `${Math.round(b.progress)}%`}</div>
-                  <Progress value={b.progress} tone={b.status === 'done' ? 'ok' : 'accent'} />
-                </li>
-              ))}
-              {shown.length === 0 && <li className="text-fg3">Нет фоновых задач</li>}
+          <div className="anim-in absolute right-0 top-10 z-40 w-[360px] rounded-xl border border-line2 bg-surface p-3" style={{ boxShadow: 'var(--shadow)' }}>
+            <div className="mb-2 flex items-center justify-between"><span className="text-[12px] font-medium uppercase tracking-wider text-fg3">Ассистент</span><button className="text-[12px] text-fg3 hover:text-fg" onClick={() => { setOpen(false); go('activity') }}>Весь журнал</button></div>
+            {runs.map(r => <div key={r.id} className="mb-2 flex items-center gap-2 text-[13px]"><Loader2 size={13} className="spin shrink-0 text-accent" /><span className="truncate">{r.current}</span></div>)}
+            {asks.map(a => (
+              <div key={a.id} className="mb-2 rounded-lg bg-warn/10 p-2 text-[13px]"><div className="mb-2">{a.text}</div>
+                <div className="flex gap-2"><button className="rounded-md bg-accent px-2.5 py-1 text-[12px] text-accentfg" onClick={() => decide(a.run, a.id, true)}>Разрешить</button><button className="rounded-md border border-line px-2.5 py-1 text-[12px]" onClick={() => decide(a.run, a.id, false)}>Отклонить</button></div></div>
+            ))}
+            {!runs.length && <div className="mb-2 text-[13px] text-fg3">Сейчас ничего не выполняет</div>}
+            <div className="mt-1 border-t border-line pt-2 text-[11.5px] uppercase tracking-wider text-fg3">Последние действия</div>
+            <ul className="mt-1 max-h-[240px] space-y-1.5 overflow-y-auto">
+              {(data?.items ?? []).slice(0, 6).map(i => <li key={i.id} className="flex items-center gap-2 text-[12.5px]">{i.status === 'ok' ? <Check size={13} className="shrink-0 text-ok" /> : <X size={13} className="shrink-0 text-err" />}<span className="min-w-0 flex-1 truncate">{i.label}</span><span className="shrink-0 text-fg3">{fmtAt(i.at)}</span></li>)}
+              {!data?.items.length && <li className="text-[12.5px] text-fg3">Пока ничего</li>}
             </ul>
           </div>
         </>
@@ -186,7 +193,7 @@ function TopBar() {
       </div>
       <div className="flex items-center gap-1">
         <UpdateChip />
-        <BgButton />
+        <AssistantChip />
         <button
           onClick={() => {
             // emergency stop: running agents stop at once on the server, new tasks are blocked until resumed
@@ -211,8 +218,8 @@ export default function App() {
 }
 
 function Shell() {
-  const { route, rightPanel, setPalette, toast, sidebar, tickBg } = useApp()
-  useEffect(() => { const t = setInterval(tickBg, 1000); return () => clearInterval(t) }, [tickBg])
+  const { route, rightPanel, setPalette, toast, sidebar } = useApp()
+  useEffect(() => startLive(), [])
   useEffect(() => startAutoCheck(), [])
   useEffect(() => {
     useApp.getState().loadTasks()
@@ -239,7 +246,7 @@ function Shell() {
 
   const page = {
     chat: <ChatPage />, projects: <ProjectsPage />, tasks: <TasksPage />, calendar: <CalendarPage />, meetings: <MeetingsPage />,
-    mail: <MailPage />, browser: <BrowserPage />, automations: <AutomationsPage />, knowledge: <KnowledgePage />, reports: <ReportsPage />,
+    mail: <MailPage />, browser: <BrowserPage />, automations: <AutomationsPage />, knowledge: <KnowledgePage />, reports: <ReportsPage />, archive: <ArchivePage />,
     integrations: <IntegrationsPage />, models: <ModelsPage />, activity: <ActivityPage />, settings: <SettingsPage />,
   }[route]
 

@@ -78,6 +78,23 @@ def presign(cfg: S3Config, key: str, seconds: int = 300) -> str:
     return client(cfg).generate_presigned_url("get_object", Params={"Bucket": cfg.bucket, "Key": key}, ExpiresIn=seconds)
 
 
+def usage(cfg: S3Config) -> dict:
+    """Bytes and object count per top-level folder (folder markers excluded)."""
+    by: dict[str, dict] = {}
+    total = count = 0
+    for page in client(cfg).get_paginator("list_objects_v2").paginate(Bucket=cfg.bucket):
+        for o in page.get("Contents", []):
+            if o["Key"].endswith("/") and o["Size"] == 0:
+                continue
+            top = o["Key"].split("/", 1)[0]
+            d = by.setdefault(top, {"size": 0, "count": 0})
+            d["size"] += o["Size"]
+            d["count"] += 1
+            total += o["Size"]
+            count += 1
+    return {"total": total, "count": count, "folders": by}
+
+
 def health(cfg: S3Config) -> dict:
     try:
         client(cfg).head_bucket(Bucket=cfg.bucket)

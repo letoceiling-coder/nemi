@@ -64,6 +64,7 @@ export const api = {
   modelRoles: () => req<ModelRoles>('/models/roles'),
   modelSettings: () => req<{ private_only: boolean }>('/models/settings'),
   setModelSettings: (private_only: boolean) => req<{ private_only: boolean }>('/models/settings', { method: 'PUT', body: JSON.stringify({ private_only }) }),
+  extract: (name: string, data: string) => req<{ name: string; text: string; chars: number; truncated: boolean }>('/files/extract', { method: 'POST', body: JSON.stringify({ name, data }) }),
   approve: (run: string, id: string, approve: boolean) => req<{ ok: boolean }>(`/assistant/runs/${run}/approvals/${id}`, { method: 'POST', body: JSON.stringify({ approve }) }),
   stopAgents: () => req<{ stopped: number }>('/assistant/stop', { method: 'POST' }),
   conversations: () => req<Conv[]>('/assistant/conversations'),

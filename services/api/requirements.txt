@@ -5,6 +5,8 @@ icalendar==6.3.1
 keyring==25.7.0
 pydantic==2.14.3
 pydantic-settings==2.16.2
+pypdf==5.4.0
+python-docx==1.1.2
 pytest==9.2.0
 pytest-asyncio==1.4.1.post1
 SQLAlchemy==2.1.8

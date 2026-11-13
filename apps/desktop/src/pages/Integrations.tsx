@@ -1,68 +1,95 @@
 import { useEffect, useState } from 'react'
-import { api, ApiError } from '../api'
-import { integrations } from '../data'
+import { api, ApiError, Health, ProviderModels } from '../api'
 import { Page, PageHeader, Card, Badge, Button, Section, Modal, Input } from '../ui'
 import { useApp } from '../store'
 import { CalendarSync } from './CalendarSync'
 
+const PROVIDERS = [
+  { id: 'siteaccess', secret: 'siteaccess_api_key', name: 'Сервер SiteAccess', desc: 'Ваш сервер моделей api.siteaccess.ru — основной', placeholder: 'API-ключ сервера (раздел «Ключи» в кабинете)' },
+  { id: 'openrouter', secret: 'openrouter_api_key', name: 'OpenRouter', desc: 'Облачные модели — резерв, когда сервер занят', placeholder: 'API-ключ OpenRouter (sk-or-…)' },
+] as const
+
+// not built yet: shown so it is clear what is coming, never as «connected»
+const PLANNED = [
+  { name: 'Яндекс Почта', desc: 'Чтение, разбор, черновики ответов', stage: 2 },
+  { name: 'Gmail', desc: 'Через ваш проект Google', stage: 2 },
+  { name: 'Яндекс Телемост · Zoom', desc: 'Запись и расшифровка встреч', stage: 5 },
+  { name: 'Telegram', desc: 'Личные чаты и каналы', stage: 7 },
+  { name: 'WordPress и сайты', desc: 'Публикация материалов', stage: 9 },
+]
+
 export function IntegrationsPage() {
-  const { notify } = useApp()
-  const [state, setState] = useState(Object.fromEntries(integrations.map(i => [i.id, i.connected])))
-  const [cfg, setCfg] = useState<string | null>(null)
+  const { notify, go, setSettingsCat } = useApp()
+  const [health, setHealth] = useState<Health | null>(null)
+  const [models, setModels] = useState<ProviderModels[] | null>(null)
+  const [cfg, setCfg] = useState<(typeof PROVIDERS)[number] | null>(null)
   const [key, setKey] = useState('')
   const [busy, setBusy] = useState(false)
-  const secretOf: Record<string, string> = { i0: 'openrouter_api_key', i00: 'siteaccess_api_key' }
-  const providerOf: Record<string, string> = { i0: 'openrouter', i00: 'siteaccess' }
-  const refresh = () => api.health().then(h => setState(s => ({ ...s, i0: h.providers.find(p => p.name === 'openrouter')?.configured ?? false, i00: h.providers.find(p => p.name === 'siteaccess')?.configured ?? false, i10: h.s3.ok }))).catch(() => {})
+  const refresh = () => { api.health().then(setHealth).catch(() => {}); api.models().then(setModels).catch(() => setModels([])) }
   useEffect(() => { refresh() }, [])
+
   const saveKey = async () => {
-    if (!cur) return
-    if (!secretOf[cur.id]) { setState(s => ({ ...s, [cur.id]: true })); setCfg(null); notify('Подключение проверено'); return }
+    if (!cfg) return
     setBusy(true)
     try {
-      await api.putSecret(secretOf[cur.id], key.trim())
-      const m = (await api.models()).find(x => x.provider === providerOf[cur.id])
+      await api.putSecret(cfg.secret, key.trim())
+      const m = (await api.models()).find(x => x.provider === cfg.id)
       notify(m?.available ? `Ключ сохранён в Credential Manager. Моделей: ${m.models.length}` : `Ключ сохранён, но сервер ответил: ${m?.error ?? 'нет связи'}`)
       setKey(''); setCfg(null); refresh()
     } catch (e) { notify(e instanceof ApiError ? e.message : 'Не удалось сохранить') }
     finally { setBusy(false) }
   }
-  const kinds = [...new Set(integrations.map(i => i.kind))]
-  const cur = integrations.find(i => i.id === cfg)
+  const state = (id: string) => {
+    const configured = health?.providers.find(p => p.name === id)?.configured
+    const m = models?.find(x => x.provider === id)
+    if (!health) return null
+    if (!configured) return <Badge>нет ключа</Badge>
+    if (!models) return <Badge>проверяю…</Badge>
+    return m?.available ? <Badge tone="ok" dot>Подключено · {m.models.length} моделей</Badge> : <Badge tone="err" dot>{m?.error ?? 'нет связи'}</Badge>
+  }
   return (
     <Page>
-      <PageHeader title="Интеграции" subtitle="Каждая интеграция — отдельный плагин с минимальными правами" />
-      <div className="px-8">
+      <PageHeader title="Интеграции" subtitle="Показаны только настоящие подключения. Ключи хранятся в Windows Credential Manager." />
+      <div className="px-8 pb-8">
         <CalendarSync />
-        {kinds.map(k => (
-          <Section key={k} title={k}>
-            <div className="grid grid-cols-2 gap-3">
-              {integrations.filter(i => i.kind === k).map(i => (
-                <Card key={i.id} className="flex items-center gap-3">
-                  <div className="grid size-9 place-items-center rounded-lg bg-surface3 font-semibold text-fg2">{i.name[0]}</div>
-                  <div className="min-w-0 flex-1"><div className="font-medium">{i.name}</div><div className="truncate text-[12.5px] text-fg3">{i.desc}</div></div>
-                  {state[i.id] ? <><Badge tone="ok" dot>Подключено</Badge><Button size="sm" onClick={() => setCfg(i.id)}>Настроить</Button></> : <Button size="sm" onClick={() => setCfg(i.id)}>Подключить</Button>}
-                </Card>
-              ))}
-            </div>
-          </Section>
-        ))}
+        <Section title="AI-провайдеры">
+          <div className="grid grid-cols-2 gap-3">
+            {PROVIDERS.map(p => (
+              <Card key={p.id} className="flex items-center gap-3">
+                <div className="grid size-9 place-items-center rounded-lg bg-surface3 font-semibold text-fg2">{p.name[0]}</div>
+                <div className="min-w-0 flex-1"><div className="font-medium">{p.name}</div><div className="truncate text-[12.5px] text-fg3">{p.desc}</div></div>
+                {state(p.id)}<Button size="sm" onClick={() => setCfg(p)}>Ключ</Button>
+              </Card>
+            ))}
+          </div>
+        </Section>
+        <Section title="Хранилище">
+          <Card className="flex items-center gap-3">
+            <div className="grid size-9 place-items-center rounded-lg bg-surface3 font-semibold text-fg2">S</div>
+            <div className="min-w-0 flex-1"><div className="font-medium">Selectel S3</div><div className="truncate text-[12.5px] text-fg3">Файлы и ежедневные резервные копии{health?.s3.bucket && ` · бакет ${health.s3.bucket}`}</div></div>
+            {health && (health.s3.ok ? <Badge tone="ok" dot>Подключено</Badge> : <Badge tone="err" dot>{health.s3.error ?? 'нет связи'}</Badge>)}
+            <Button size="sm" onClick={() => { setSettingsCat('storage'); go('settings') }}>Подробнее</Button>
+          </Card>
+        </Section>
+        <Section title="В разработке">
+          <div className="grid grid-cols-2 gap-3">
+            {PLANNED.map(p => (
+              <Card key={p.name} className="flex items-center gap-3 opacity-70">
+                <div className="grid size-9 place-items-center rounded-lg bg-surface3 font-semibold text-fg3">{p.name[0]}</div>
+                <div className="min-w-0 flex-1"><div className="font-medium">{p.name}</div><div className="truncate text-[12.5px] text-fg3">{p.desc}</div></div>
+                <Badge>этап {p.stage}</Badge>
+              </Card>
+            ))}
+          </div>
+        </Section>
       </div>
-      <Modal open={!!cur} onClose={() => setCfg(null)} title={cur ? `${cur.name}` : ''} footer={<>
-        {cur && state[cur.id] && <Button variant="danger" onClick={() => { setState(s => ({ ...s, [cur.id]: false })); setCfg(null); notify('Интеграция отключена') }}>Отключить</Button>}
+      <Modal open={!!cfg} onClose={() => setCfg(null)} title={cfg?.name ?? ''} footer={<>
         <Button onClick={() => setCfg(null)}>Закрыть</Button>
-        <Button variant="primary" onClick={saveKey} disabled={busy || !cur || (!!secretOf[cur.id] && key.trim().length < 8)}>{busy ? 'Проверяю…' : 'Проверить и сохранить'}</Button></>}>
-        <p className="mb-3 text-fg2">Секреты хранятся в Windows Credential Manager и не попадают в логи и Git.</p>
-        {cur?.id === 'i0'
-          ? <div className="space-y-2"><Input type="password" placeholder="API-ключ OpenRouter (sk-or-…)" value={key} onChange={e => setKey(e.target.value)} />
-              <select className="h-9 w-full rounded-lg border border-line bg-surface px-2 text-[13.5px]">{['Авто (лучшая по цене/качеству)', 'anthropic/claude-sonnet', 'openai/gpt-4o', 'qwen/qwen3-235b', 'google/gemini-2.5-pro', 'meta-llama/llama-3.3-70b'].map(m => <option key={m}>{m}</option>)}</select>
-              <Input placeholder="Месячный лимит расходов, $" />
-              <p className="text-[12.5px] text-warn">Запросы уйдут во внешнее облако. Для приватных данных используйте локальные модели Ollama — можно отключить OpenRouter для отдельных агентов в «Модели AI».</p></div>
-          : cur?.id === 'i00'
-          ? <div className="space-y-2"><Input value="https://api.siteaccess.ru/v1" readOnly /><Input type="password" placeholder="API-ключ сервера (раздел «Ключи» в кабинете)" value={key} onChange={e => setKey(e.target.value)} />
-              <p className="text-[12.5px] text-fg3">Основной провайдер. Если сервер занят или недоступен, запросы автоматически уходят в OpenRouter.</p></div>
-          : <div className="space-y-2"><Input placeholder="Endpoint / адрес сервера" /><Input type="password" placeholder="Ключ доступа" /></div>}
-        <p className="mt-3 text-[12.5px] text-fg3">Разрешения: чтение (по умолчанию). Отправка и публикация — по запросу.</p>
+        <Button variant="primary" onClick={saveKey} disabled={busy || key.trim().length < 8}>{busy ? 'Проверяю…' : 'Проверить и сохранить'}</Button></>}>
+        <p className="mb-3 text-fg2">Ключ сохраняется в Windows Credential Manager и не попадает в логи и Git.</p>
+        {cfg && <Input type="password" placeholder={cfg.placeholder} value={key} onChange={e => setKey(e.target.value)} />}
+        {cfg?.id === 'openrouter' && <p className="mt-3 text-[12.5px] text-fg3">Запросы в OpenRouter уходят во внешнее облако. Выбор моделей, месячный лимит и режим «Только мой сервер» — в «Модели AI».</p>}
+        {cfg?.id === 'siteaccess' && <p className="mt-3 text-[12.5px] text-fg3">Основной провайдер. Если сервер занят или недоступен, запросы автоматически уходят в OpenRouter.</p>}
       </Modal>
     </Page>
   )

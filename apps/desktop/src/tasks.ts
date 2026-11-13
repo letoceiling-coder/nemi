@@ -67,7 +67,11 @@ export const toLocalInput = (iso: string | null, withTime: boolean) => {
 }
 
 // ---------- reminders ----------
-async function osNotify(title: string, body: string) {
+/** Windows notifications for reminders (Settings → Уведомления); in-app toasts are always shown. */
+export const osNotifyOn = () => localStorage.getItem('pai:notify_os') !== '0'
+export const setOsNotify = (on: boolean) => localStorage.setItem('pai:notify_os', on ? '1' : '0')
+
+export async function osNotify(title: string, body: string) {
   if (isDesktop()) {
     try {
       const n = await import('@tauri-apps/plugin-notification')
@@ -89,7 +93,7 @@ export function startReminders(onFire: (r: Reminder) => void) {
     if (stopped) return
     try {
       for (const t of await tasksApi.dueReminders()) {
-        await osNotify(t.kind === 'event' ? 'NEMI · скоро встреча' : 'NEMI · напоминание', reminderText(t))
+        if (osNotifyOn()) await osNotify(t.kind === 'event' ? 'NEMI · скоро встреча' : 'NEMI · напоминание', reminderText(t))
         onFire(t)
       }
     } catch { /* backend restarting: next tick */ }

@@ -1,17 +1,15 @@
 import { create } from 'zustand'
 import { getToken, clearSession, api, Conv } from './api'
-import { automations as seedAuto, Automation } from './data'
 import { tasksApi, Task, Project, TaskInput, errText } from './tasks'
 
-export type Route = 'chat' | 'projects' | 'tasks' | 'calendar' | 'meetings' | 'mail' | 'browser' | 'automations' | 'knowledge' | 'reports' | 'integrations' | 'models' | 'activity' | 'settings'
+export type Route = 'chat' | 'projects' | 'tasks' | 'calendar' | 'meetings' | 'mail' | 'browser' | 'automations' | 'knowledge' | 'reports' | 'archive' | 'integrations' | 'models' | 'activity' | 'settings'
 export type SettingsCat = 'general' | 'memory' | 'account' | 'security' | 'notifications' | 'storage' | 'integrations' | 'models' | 'activity' | 'updates' | 'diagnostics'
 export type Theme = 'dark' | 'light'
 
 export interface Step { id?: string; label: string; tool: string; status: 'done' | 'active' | 'pending' | 'error' | 'wait'; detail?: string }
 export interface Approval { id: string; run: string; text: string; state: 'ask' | 'sending' | 'approved' | 'declined' | 'timeout' | 'stopped' }
-export interface Att { name: string; size: number; type: string; url?: string }
+export interface Att { name: string; size: number; type: string; url?: string; file?: File }
 export interface Msg { id: string; role: 'user' | 'assistant'; text: string; files?: Att[]; steps?: Step[]; approval?: Approval; running?: boolean; error?: string; memory?: string[] }
-export interface Bg { id: string; title: string; agent: string; progress: number; status: 'run' | 'done' | 'queued' | 'cancel' }
 
 interface S {
   route: Route; go: (r: Route, id?: string) => void
@@ -27,13 +25,17 @@ interface S {
   addTask: (title: string, extra?: Partial<TaskInput>) => Promise<Task | null>; setTaskStatus: (id: string, st: Task['status']) => void
   updateTask: (id: string, p: Parameters<typeof tasksApi.update>[1]) => Promise<void>; removeTask: (id: string) => Promise<void>
   calTick: number; bumpCal: () => void   // calendar changed elsewhere (agent, reminders) -> views reload
-  autos: Automation[]; toggleAuto: (id: string) => void
   emergency: boolean; setEmergency: (v: boolean) => void
-  bg: Bg[]; addBg: (title: string, agent: string) => void; tickBg: () => void; cancelBg: (id: string) => void
   browserOpen: boolean; browserUrl: string; openBrowser: (url?: string) => void; closeBrowser: () => void
   authed: boolean; setAuthed: (v: boolean) => void
   convId?: string; setConvId: (id?: string) => void
   convs: Conv[]; loadConvs: () => Promise<void>; openConv: (id: string) => Promise<void>; removeConv: (id: string) => Promise<void>
+}
+
+/** A stored user message = typed text + attached files' text after a marker; show the text and the file names. */
+function splitAttach(content: string): { text: string; files?: Att[] } {
+  const [text, ...rest] = content.split('\n\n[Вложение: ')
+  return rest.length ? { text, files: rest.map(r => ({ name: r.split(/[,\]]/)[0], size: 0, type: '' })) } : { text }
 }
 
 const embedded: Route[] = ['integrations', 'models', 'activity']
@@ -68,24 +70,7 @@ export const useApp = create<S>((set, get) => ({
     set(s => ({ tasks: s.tasks.filter(t => t.id !== id) }))
     try { await tasksApi.remove(id) } catch (e) { get().notify(errText(e, 'Не удалось удалить')) } finally { get().loadTasks() }
   },
-  autos: seedAuto, toggleAuto: id => set(s => ({ autos: s.autos.map(a => a.id === id ? { ...a, enabled: !a.enabled } : a) })),
   emergency: false, setEmergency: emergency => set({ emergency }),
-  bg: [
-    { id: 'b1', title: 'Расшифровка «Планёрка по CRM»', agent: 'Meeting Agent', progress: 64, status: 'run' },
-    { id: 'b2', title: 'Индексация документов в базу знаний', agent: 'Knowledge Agent', progress: 30, status: 'run' },
-    { id: 'b3', title: 'Резервная копия в S3', agent: 'Storage', progress: 0, status: 'queued' },
-  ],
-  addBg: (title, agent) => set(s => ({ bg: [{ id: 'b' + Date.now(), title, agent, progress: 0, status: 'run' }, ...s.bg] })),
-  tickBg: () => set(s => {
-    if (s.emergency) return {}
-    let running = s.bg.filter(b => b.status === 'run').length
-    return { bg: s.bg.map(b => {
-      if (b.status === 'run') { const p = Math.min(100, b.progress + 2 + Math.random() * 4); return { ...b, progress: p, status: p >= 100 ? 'done' as const : 'run' as const } }
-      if (b.status === 'queued' && running < 2) { running++; return { ...b, status: 'run' as const } }
-      return b
-    }) }
-  }),
-  cancelBg: id => set(s => ({ bg: s.bg.map(b => b.id === id ? { ...b, status: 'cancel' } : b) })),
   browserOpen: false, browserUrl: '',
   openBrowser: (url = '') => set(s => ({ browserOpen: true, browserUrl: url || s.browserUrl })),
   closeBrowser: () => set({ browserOpen: false }),
@@ -99,7 +84,7 @@ export const useApp = create<S>((set, get) => ({
     try {
       const c = await api.conversation(id)
       set({ route: 'chat', browserOpen: false, convId: c.id,
-        messages: c.messages.map((m, i) => ({ id: `h${i}-${c.id}`, role: m.role, text: m.content,
+        messages: c.messages.map((m, i) => ({ id: `h${i}-${c.id}`, role: m.role, ...splitAttach(m.content),
           steps: m.role === 'assistant' && m.model ? [{ label: 'Модель', tool: `${m.provider} · ${m.model}`, status: 'done' as const },
             ...(m.tools ?? []).map(t => ({ label: t.label, tool: t.tool, status: t.status }))] : undefined })) })
     } catch { get().notify('Не удалось открыть диалог'); get().loadConvs() }
@@ -111,3 +96,4 @@ export const useApp = create<S>((set, get) => ({
   },
 }))
 document.documentElement.dataset.theme = useApp.getState().theme
+document.documentElement.dataset.motion = localStorage.getItem('pai:motion') === 'off' ? 'off' : 'on'

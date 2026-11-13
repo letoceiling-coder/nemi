@@ -23,7 +23,7 @@ import httpx
 from sqlalchemy import select
 
 from . import memory
-from .db import Conversation, MemoryFact, Message, SessionLocal
+from .db import MemoryFact, SessionLocal
 
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) NEMI/0.2"
 MAX_RESULT = 6000          # chars of a tool result passed back to the model
@@ -126,23 +126,44 @@ def _forget_text(ctx: Ctx, a: dict) -> str:
 
 # ---------- past conversations ----------
 async def _conversations_search(ctx: Ctx, a: dict) -> str:
+    return await _archive_search(ctx, {**a, "kinds": ["message"]})
+
+
+_KIND_RU = {"message": "диалог", "task": "задача", "event": "событие", "memory": "память", "project": "проект",
+            "action": "действие ассистента"}
+
+
+def _bound(v, end: bool = False) -> datetime | None:
+    """Period edge from the model: a date means the start of that day (the next day for `until`)."""
+    if not v:
+        return None
+    v = str(v).strip()
+    try:
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", v):
+            d = datetime.fromisoformat(v).astimezone()
+            return d + timedelta(days=1) if end else d
+        return datetime.fromisoformat(v.replace("Z", "+00:00")).astimezone()
+    except ValueError:
+        raise ToolError(f"не понял дату «{v}»: нужен формат ГГГГ-ММ-ДД")
+
+
+async def _archive_search(ctx: Ctx, a: dict) -> str:
+    from . import archive
     q = str(a.get("query", "")).strip()
     if len(q) < 2:
         raise ToolError("слишком короткий запрос")
-    like = f"%{q}%"
+    kinds = a.get("kinds") if isinstance(a.get("kinds"), list) else None
     with SessionLocal() as db:
-        rows = db.execute(
-            select(Message, Conversation.title).join(Conversation, Conversation.id == Message.conv_id)
-            .where(Message.user_id == ctx.uid, Message.content.ilike(like))
-            .order_by(Message.created.desc()).limit(8)).all()
+        rows = archive.search(db, ctx.uid, q, kinds, _bound(a.get("since")), _bound(a.get("until"), True), limit=15)
     if not rows:
-        return "Ничего не найдено в прошлых диалогах."
+        return "В архиве ничего не найдено. Попробуй другое слово (корень, без окончания) или шире период."
     out = []
-    for m, title in rows:
-        i = m.content.lower().find(q.lower())
-        snip = m.content[max(0, i - 120): i + 200] if i >= 0 else m.content[:300]
-        who = "пользователь" if m.role == "user" else "ассистент"
-        out.append(f"«{title}», {m.created:%d.%m.%Y}, {who}: …{' '.join(snip.split())}…")
+    for r in rows:
+        when = datetime.fromisoformat(r["at"]).astimezone().strftime("%d.%m.%Y")
+        who = {"user": "пользователь: ", "assistant": "ассистент: "}.get(r.get("who", ""), "")
+        body = f" — {who}{r['snippet']}" if r.get("snippet") else ""
+        st = f" [{r['status']}]" if r.get("status") else ""
+        out.append(f"{when} · {_KIND_RU[r['kind']]} «{r['title']}»{st}{body}")
     return "\n".join(out)
 
 
@@ -553,6 +574,15 @@ TOOLS: dict[str, Tool] = {t.name: t for t in [
     Tool("memory_forget", "Удалить факт из памяти по идентификатору из memory_search. Требует подтверждения пользователя.",
          _obj({"fact_id": {"type": "string"}}, ["fact_id"]), "confirm", _memory_forget,
          lambda a: "Удаляю факт из памяти", confirm_text=_forget_text),
+    Tool("archive_search", "Поиск по всей истории пользователя за любое время (хранится бессрочно): диалоги, задачи (и выполненные), "
+         "события календаря, память, проекты, действия ассистента. Для «что мы решили / обсуждали / делали тогда-то». "
+         "Ищет подстроку без учёта регистра — передавай корень слова. since/until — границы периода (ГГГГ-ММ-ДД).",
+         _obj({"query": {"type": "string", "description": "слово или фраза (лучше корень: «договор», «смет»)"},
+               "since": {"type": "string", "description": "начало периода ГГГГ-ММ-ДД"},
+               "until": {"type": "string", "description": "конец периода ГГГГ-ММ-ДД (включительно)"},
+               "kinds": {"type": "array", "items": {"type": "string", "enum": ["message", "task", "event", "memory", "project", "action"]}}},
+              ["query"]), "read", _archive_search,
+         lambda a: f"Ищу в архиве: {_short(a.get('query', ''), 40)}"),
     Tool("conversations_search", "Поиск по прошлым диалогам пользователя с ассистентом (точное совпадение слова или фразы).",
          _obj({"query": {"type": "string", "description": "слово или фраза"}}, ["query"]), "read", _conversations_search,
          lambda a: f"Ищу в прошлых диалогах: {_short(a.get('query', ''), 40)}"),

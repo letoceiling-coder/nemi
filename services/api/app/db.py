@@ -14,6 +14,8 @@ def _pragmas(dbapi_conn, _):  # durability + FK enforcement
     cur.execute("PRAGMA journal_mode=WAL")
     cur.execute("PRAGMA foreign_keys=ON")
     cur.close()
+    # SQLite lower()/LIKE only fold ASCII; archive search must be case-insensitive for Cyrillic too
+    dbapi_conn.create_function("ulower", 1, lambda v: v.lower() if isinstance(v, str) else v, deterministic=True)
 
 
 SessionLocal = sessionmaker(engine, expire_on_commit=False)
@@ -144,6 +146,21 @@ class AppSetting(Base):
     __tablename__ = "app_settings"
     key: Mapped[str] = mapped_column(String(80), primary_key=True)
     value: Mapped[str] = mapped_column(Text)
+
+
+class AgentAction(Base):
+    """Every tool call the assistant made, kept forever: what, when, in which dialog, result. Shown in «Центр активности»."""
+    __tablename__ = "agent_actions"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=uid)
+    user_id: Mapped[str] = mapped_column(String(32), index=True)
+    run_id: Mapped[str] = mapped_column(String(32), index=True)
+    conv_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    tool: Mapped[str] = mapped_column(String(60))
+    label: Mapped[str] = mapped_column(String(300))
+    status: Mapped[str] = mapped_column(String(10))       # ok | error | declined | timeout | stopped
+    detail: Mapped[str] = mapped_column(Text, default="")  # error text or a short result
+    ms: Mapped[int] = mapped_column(default=0)
+    at: Mapped[datetime] = mapped_column(default=now, index=True)
 
 
 class AuditLog(Base):

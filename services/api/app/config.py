@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     host: str = "127.0.0.1"   # backend listens on localhost only
     port: int = 8731
     data_dir: Path = _data_dir()
+    backup_auto: bool = True   # daily DB copy to S3; PAI_BACKUP_AUTO=0 for dev/test backends (never upload a test DB)
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173", "tauri://localhost", "http://tauri.localhost"]
 
     # model providers (ordered by priority: own server first, OpenRouter as fallback)

@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
-import { CornerDownLeft, FolderKanban, CheckSquare, Mic, Settings, Workflow, Sparkles, Plus } from 'lucide-react'
+import { CornerDownLeft, FolderKanban, CheckSquare, Settings, Sparkles, Plus, MessageSquare, Archive } from 'lucide-react'
 import { useApp } from '../store'
-import { projects, meetings, automations } from '../data'
 
 interface Cmd { id: string; label: string; group: string; icon: typeof Plus; run: () => void }
 
 export function Palette() {
-  const { palette, setPalette, go, tasks, addTask, notify, toggleTheme, setMessages } = useApp()
+  const { palette, setPalette, go, tasks, projects, convs, openConv, addTask, notify, toggleTheme, setMessages } = useApp()
   const [q, setQ] = useState('')
   const [i, setI] = useState(0)
   const ref = useRef<HTMLInputElement>(null)
@@ -20,15 +19,15 @@ export function Palette() {
       c.push({ id: 'ask', label: `Спросить ассистента: «${q}»`, group: 'Действия', icon: Sparkles, run: () => { close(); (window as unknown as { __ask?: string }).__ask = q; setMessages(() => []); go('chat') } })
       c.push({ id: 'new', label: `Создать задачу: «${q}»`, group: 'Действия', icon: Plus, run: () => { addTask(q); close(); notify('Задача создана'); go('tasks') } })
     }
+    if (q.trim().length >= 2) c.push({ id: 'arch', label: `Искать «${q}» во всей истории`, group: 'Действия', icon: Archive, run: () => { close(); (window as unknown as { __archive?: string }).__archive = q; go('archive') } })
     projects.forEach(p => c.push({ id: p.id, label: p.name, group: 'Проекты', icon: FolderKanban, run: () => { close(); go('projects', p.id) } }))
-    tasks.forEach(t => c.push({ id: t.id, label: t.title, group: 'Задачи', icon: CheckSquare, run: () => { close(); go('tasks') } }))
-    meetings.forEach(m => c.push({ id: m.id, label: m.title, group: 'Встречи', icon: Mic, run: () => { close(); go('meetings', m.id) } }))
-    automations.forEach(a => c.push({ id: a.id, label: `Автоматизация: ${a.name}`, group: 'Автоматизации', icon: Workflow, run: () => { close(); notify(`Запущено: ${a.name}`) } }))
+    tasks.filter(t => t.status !== 'done').forEach(t => c.push({ id: t.id, label: t.title, group: 'Задачи', icon: CheckSquare, run: () => { close(); go('tasks') } }))
+    convs.forEach(h => c.push({ id: h.id, label: h.title || 'Без названия', group: 'Диалоги', icon: MessageSquare, run: () => { close(); openConv(h.id) } }))
     c.push({ id: 's', label: 'Настройки', group: 'Переход', icon: Settings, run: () => { close(); go('settings') } })
     c.push({ id: 'th', label: 'Сменить тему', group: 'Переход', icon: Settings, run: () => { close(); toggleTheme() } })
     const s = q.trim().toLowerCase()
-    return s ? c.filter(x => x.id === 'ask' || x.id === 'new' || x.label.toLowerCase().includes(s)) : c.slice(0, 9)
-  }, [q, tasks, go, addTask, notify, setPalette, toggleTheme, setMessages])
+    return s ? c.filter(x => x.id === 'ask' || x.id === 'new' || x.id === 'arch' || x.label.toLowerCase().includes(s)).slice(0, 40) : c.slice(0, 9)
+  }, [q, tasks, projects, convs, openConv, go, addTask, notify, setPalette, toggleTheme, setMessages])
 
   if (!palette) return null
   const onKey = (e: React.KeyboardEvent) => {
@@ -41,7 +40,7 @@ export function Palette() {
     <div className="fixed inset-0 z-50 grid place-items-start justify-center bg-black/50 pt-[14vh]" onClick={() => setPalette(false)}>
       <div className="anim-in w-[600px] max-w-[92vw] overflow-hidden rounded-2xl border border-line2 bg-surface" style={{ boxShadow: 'var(--shadow)' }} onClick={e => e.stopPropagation()}>
         <input ref={ref} value={q} onChange={e => { setQ(e.target.value); setI(0) }} onKeyDown={onKey}
-          placeholder="Найти проект, задачу, встречу — или дать команду ассистенту" className="h-12 w-full border-b border-line bg-transparent px-4 text-[15px] outline-none placeholder:text-fg3" />
+          placeholder="Найти проект, задачу, диалог — или дать команду ассистенту" className="h-12 w-full border-b border-line bg-transparent px-4 text-[15px] outline-none placeholder:text-fg3" />
         <div className="max-h-[360px] overflow-y-auto p-1.5">
           {list.length === 0 && <div className="p-6 text-center text-fg3">Ничего не найдено</div>}
           {list.map((c, n) => {
