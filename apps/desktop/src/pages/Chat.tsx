@@ -3,6 +3,7 @@ import clsx from 'clsx'
 import { ArrowUp, Paperclip, Mic, Square, ChevronDown, Copy, RotateCw, Check, Loader2, AlertCircle, Circle, Sparkles, Pencil, X, ChevronRight, ShieldCheck, Globe, FileText, FileSpreadsheet, File as FileIcon, Mail, CalendarCheck, BarChart3, FolderKanban, Mic as MicI, UploadCloud, Brain } from 'lucide-react'
 import { useApp, Msg, Step, Att } from '../store'
 import { BrowserView } from '../components/BrowserView'
+import { Resizer, usePanelWidth } from '../components/Resizer'
 import { api, chatStream, getPref, setPref, ProviderModels, getAutoMemory, Budget } from '../api'
 import { IconButton, Button, Badge } from '../ui'
 
@@ -94,6 +95,11 @@ const cards = [
 
 export default function ChatPage() {
   const { messages, setMessages, emergency, notify, browserOpen, openBrowser, closeBrowser, addBg } = useApp()
+  const bw = usePanelWidth('browser', 520, 320, 1400)
+  const split = useRef<HTMLDivElement>(null)
+  // the chat keeps at least 360px: the browser can't be dragged wider than the space actually left
+  const bwSet = (w: number) => bw.set(Math.min(w, (split.current?.clientWidth ?? 1e4) - 360))
+  const bwSave = (w: number) => bw.save(Math.min(w, (split.current?.clientWidth ?? 1e4) - 360))
   const [val, setVal] = useState('')
   const [pm, setPm] = useState<ProviderModels[]>([])
   const [model, setModel] = useState(getPref().model || 'Авто')
@@ -302,9 +308,10 @@ export default function ChatPage() {
   )
 
   return (
-    <div className="relative flex h-full" {...dnd}>
+    <div ref={split} className="relative flex h-full" {...dnd}>
       <div className="relative min-w-0 flex-1">{body}</div>
-      {browserOpen && <div className="anim-in w-[46%] min-w-[340px] shrink-0 border-l border-line"><BrowserView compact onClose={closeBrowser} /></div>}
+      {browserOpen && <Resizer side="right" label="Ширина браузера" width={bw.width} onChange={bwSet} onCommit={bwSave} onReset={bw.reset} />}
+      {browserOpen && <div style={{ width: bw.width }} className="anim-in max-w-[calc(100%-360px)] shrink-0 border-l border-line"><BrowserView compact onClose={closeBrowser} /></div>}
       {overlay}{lightbox}
     </div>
   )

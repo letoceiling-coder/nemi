@@ -1,4 +1,5 @@
 import { useApp } from '../store'
+import { Resizer, usePanelWidth } from './Resizer'
 import { meetings, agents } from '../data'
 import { Badge, Progress } from '../ui'
 import { CheckCircle2, Circle, Mic, Bot, Bell, Database, Cpu, HardDrive } from 'lucide-react'
@@ -19,8 +20,11 @@ export function RightPanel() {
   const { tasks, setTaskStatus, go, emergency, bg } = useApp()
   const live = bg.filter(b => b.status !== 'cancel').slice(0, 3)
   const today = tasks.filter(t => t.status !== 'done').slice(0, 4)
+  const pw = usePanelWidth('right', 288, 240, 520)
   return (
-    <aside className="anim-in hidden w-[288px] shrink-0 overflow-y-auto border-l border-line bg-surface p-4 xl:block">
+    <>
+    <div className="hidden xl:contents"><Resizer side="right" label="Ширина правой панели" width={pw.width} onChange={pw.set} onCommit={pw.save} onReset={pw.reset} /></div>
+    <aside style={{ width: pw.width }} className="anim-in hidden shrink-0 overflow-y-auto border-l border-line bg-surface p-4 xl:block">
       <Block title="Текущие задачи" onMore={() => go('tasks')}>
         <ul className="space-y-0.5">
           {today.map(t => (
@@ -78,5 +82,6 @@ export function RightPanel() {
         </ul>
       </Block>
     </aside>
+    </>
   )
 }

@@ -21,6 +21,7 @@ import { ModelsPage } from './pages/Models'
 import { ActivityPage } from './pages/Activity'
 import { SettingsPage } from './pages/Settings'
 import { RightPanel } from './components/RightPanel'
+import { Resizer, usePanelWidth } from './components/Resizer'
 import { Palette } from './components/Palette'
 import { Auth } from './components/Auth'
 import { userKey } from './api'
@@ -92,8 +93,10 @@ function Recent() {
 function Sidebar() {
   const { sidebar, newChat, setPalette } = useApp()
   const c = !sidebar
+  const pw = usePanelWidth('sidebar', 248, 200, 420)
   return (
-    <aside className={clsx('flex shrink-0 flex-col border-r border-line bg-surface transition-[width] duration-200', c ? 'w-[56px]' : 'w-[248px]')}>
+    <>
+    <aside style={{ width: c ? 56 : pw.width }} className="flex shrink-0 flex-col border-r border-line bg-surface">
       <div className="flex h-12 items-center gap-2 px-3">
         <div className="grid size-7 shrink-0 place-items-center rounded-lg bg-accent text-[13px] font-bold text-accentfg">N</div>
         {!c && <span className="font-semibold tracking-tight">NEMI</span>}
@@ -114,6 +117,8 @@ function Sidebar() {
         {nav2.map(n => <NavItem key={n.id} item={n} collapsed={c} />)}
       </div>
     </aside>
+    {!c && <Resizer side="left" label="Ширина боковой панели" width={pw.width} onChange={pw.set} onCommit={pw.save} onReset={pw.reset} />}
+    </>
   )
 }
 
