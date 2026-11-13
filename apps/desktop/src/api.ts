@@ -56,12 +56,16 @@ export const api = {
   logs: (lines = 200, level = '') => req<{ file: string; lines: string[] }>(`/system/logs?lines=${lines}${level ? `&level=${level}` : ''}`),
   budget: () => req<Budget>('/system/budget'),
   setBudget: (limit: number) => req<Budget>('/system/budget', { method: 'PUT', body: JSON.stringify({ limit }) }),
+  modelRoles: () => req<ModelRoles>('/models/roles'),
+  modelSettings: () => req<{ private_only: boolean }>('/models/settings'),
+  setModelSettings: (private_only: boolean) => req<{ private_only: boolean }>('/models/settings', { method: 'PUT', body: JSON.stringify({ private_only }) }),
   conversations: () => req<Conv[]>('/assistant/conversations'),
   conversation: (id: string) => req<{ id: string; title: string; messages: { role: 'user' | 'assistant'; content: string; provider?: string; model?: string }[] }>(`/assistant/conversations/${id}`),
   renameConversation: (id: string, title: string) => req<{ ok: boolean }>(`/assistant/conversations/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
   deleteConversation: (id: string) => req<{ ok: boolean }>(`/assistant/conversations/${id}`, { method: 'DELETE' }),
 }
 
+export interface ModelRoles { roles: Record<string, string[]>; embedding: string }
 export interface Conv { id: string; title: string; created: string; updated: string; messages: number }
 
 export type FactKind = 'profile' | 'preference' | 'person' | 'project' | 'fact'

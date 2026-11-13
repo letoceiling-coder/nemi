@@ -77,3 +77,37 @@ def test_role_chain_falls_through_and_private_is_own_server_only(monkeypatch):
     assert text == "ok" and meta["model"] == "good"
     with pytest.raises(ProviderError):           # private never falls back to the cloud
         asyncio.run(r.complete_role("main", [], private=True))
+
+
+def test_only_mode_never_falls_back_to_cloud():
+    async def go(r):
+        return [e async for e in r.stream([{"role": "user", "content": "hi"}], prefer="openrouter", only="siteaccess")]
+    ok = asyncio.run(go(ModelRouter([Fake("siteaccess"), Fake("openrouter")])))
+    assert ok[0][1]["provider"] == "siteaccess"
+    down = asyncio.run(go(ModelRouter([Fake("siteaccess", ok=False), Fake("openrouter")])))
+    assert [k for k, _ in down] == ["error"] and "openrouter" not in down[0][1]
+
+
+def test_private_only_setting_api(monkeypatch):
+    import time
+    from fastapi.testclient import TestClient
+    from app import auth, main
+    monkeypatch.setattr(auth, "get_secret", lambda n: "k" * 64)
+    with TestClient(main.app) as c:
+        hs = []
+        for n in ("p1", "p2"):
+            r = c.post("/api/v1/auth/register", json={"name": n, "email": f"{n}-{time.time_ns()}@t.ru", "password": "secret-pass-1"})
+            hs.append({"Authorization": f"Bearer {r.json()['token']}"})
+        assert c.get("/api/v1/models/settings", headers=hs[0]).json() == {"private_only": False}
+        assert c.put("/api/v1/models/settings", headers=hs[0], json={"private_only": True}).json() == {"private_only": True}
+        assert c.get("/api/v1/models/settings", headers=hs[0]).json() == {"private_only": True}
+        assert c.get("/api/v1/models/settings", headers=hs[1]).json() == {"private_only": False}   # per user
+        # manual memory add in private mode must not call embeddings (the cloud)
+        called = []
+
+        async def no_embed(texts):
+            called.append(texts)
+            raise AssertionError("cloud embeddings called in private mode")
+        monkeypatch.setattr(main.router_models, "embed", no_embed)
+        assert c.post("/api/v1/memory", headers=hs[0], json={"text": "Любит чай", "kind": "fact"}).status_code == 200
+        assert not called

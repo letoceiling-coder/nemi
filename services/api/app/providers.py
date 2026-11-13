@@ -143,11 +143,15 @@ class ModelRouter:
     def by_name(self, name: str) -> ModelProvider | None:
         return next((p for p in self.providers if p.name == name), None)
 
-    async def stream(self, messages: list[dict], model: str | None = None, prefer: str | None = None, temperature: float = 0.7):
-        """Yields ('meta', {...}) once, then ('delta', text). Falls back to the next provider if nothing was sent yet."""
+    async def stream(self, messages: list[dict], model: str | None = None, prefer: str | None = None, temperature: float = 0.7,
+                     only: str | None = None):
+        """Yields ('meta', {...}) once, then ('delta', text). Falls back to the next provider if nothing was sent yet.
+        only="siteaccess" -> that provider alone, no cloud fallback (private mode)."""
         order = list(self.providers)
         if prefer and (p := self.by_name(prefer)):
             order = [p] + [x for x in order if x is not p]
+        if only:
+            order = [x for x in order if x.name == only]
         errors: list[str] = []
         for p in order:
             if not p.configured():

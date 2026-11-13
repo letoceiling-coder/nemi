@@ -50,6 +50,24 @@ def set_limit(value: float) -> None:
         db.commit()
 
 
+def private_only(uid: str) -> bool:
+    """Per-user "only my server" mode: chat, memory extraction and embeddings never go to the cloud."""
+    with SessionLocal() as db:
+        s = db.get(AppSetting, f"user:{uid}:private_only")
+        return bool(s and s.value == "1")
+
+
+def set_private_only(uid: str, on: bool) -> None:
+    with SessionLocal() as db:
+        k = f"user:{uid}:private_only"
+        s = db.get(AppSetting, k)
+        if s:
+            s.value = "1" if on else "0"
+        else:
+            db.add(AppSetting(key=k, value="1" if on else "0"))
+        db.commit()
+
+
 def record(model: str, cost: float, kind: str) -> None:
     if not cost or cost <= 0:
         return

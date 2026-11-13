@@ -110,7 +110,8 @@ export default function ChatPage() {
   const dragDepth = useRef(0)
   const busy = messages.some(m => m.running)
 
-  useEffect(() => { api.models().then(setPm).catch(() => {}) }, [])
+  // private mode: the picker offers only the own server's models
+  useEffect(() => { Promise.all([api.models(), api.modelSettings().catch(() => ({ private_only: false }))]).then(([ms, st]) => setPm(st.private_only ? ms.filter(m => m.provider === 'siteaccess') : ms)).catch(() => {}) }, [])
   useEffect(() => { end.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
   useEffect(() => { if (emergency) stop() }, [emergency])
   useEffect(() => {

@@ -181,6 +181,22 @@ def model_roles(uid: str = Depends(current_user)):
     return {"roles": settings.role_models, "embedding": settings.embedding_model}
 
 
+class ModelSettingsIn(BaseModel):
+    private_only: bool
+
+
+@app.get("/api/v1/models/settings")
+def model_settings(uid: str = Depends(current_user)):
+    return {"private_only": budget.private_only(uid)}
+
+
+@app.put("/api/v1/models/settings")
+def model_settings_put(b: ModelSettingsIn, uid: str = Depends(current_user), db: Session = Depends(get_db)):
+    budget.set_private_only(uid, b.private_only)
+    audit(db, uid, "models.private_only", "on" if b.private_only else "off")
+    return {"private_only": b.private_only}
+
+
 # ---------- assistant ----------
 class ChatIn(BaseModel):
     message: str = Field(min_length=1, max_length=20000)
@@ -252,8 +268,9 @@ async def chat(b: ChatIn, uid: str = Depends(current_user)):
         history = [{"role": m.role, "content": m.content} for m in db.scalars(
             select(Message).where(Message.conv_id == conv.id, Message.user_id == uid).order_by(Message.created).limit(40))]
         cid = conv.id
+        private = budget.private_only(uid)
         try:
-            facts = await memory.recall(db, router_models, uid, b.message, private=b.prefer == "siteaccess")
+            facts = await memory.recall(db, router_models, uid, b.message, private=private or b.prefer == "siteaccess")
         except Exception:  # noqa: BLE001 — memory must never break the chat
             log.warning("memory recall failed", exc_info=True)
             facts = []
@@ -266,7 +283,7 @@ async def chat(b: ChatIn, uid: str = Depends(current_user)):
         if facts:
             yield ev({"type": "recall", "count": len(facts)})
         text, meta, failed = [], {}, ""
-        async for kind, val in router_models.stream(messages, b.model, b.prefer):
+        async for kind, val in router_models.stream(messages, b.model, b.prefer, only="siteaccess" if private else None):
             if kind == "meta":
                 meta = val
                 yield ev({"type": "meta", **val})
@@ -296,7 +313,7 @@ async def chat(b: ChatIn, uid: str = Depends(current_user)):
                     with SessionLocal() as db:
                         # the turn stayed on the own server -> extraction stays there as well
                         added = await asyncio.wait_for(memory.remember(
-                            db, router_models, uid, cid, b.message, private=meta.get("provider") == "siteaccess"), 25)
+                            db, router_models, uid, cid, b.message, private=private or meta.get("provider") == "siteaccess"), 25)
                         if added:
                             audit(db, uid, "memory.auto", f"{len(added)} fact(s)")   # no fact text in the audit log
                 except Exception:  # noqa: BLE001 — timeout / provider issues: answer is already delivered
@@ -339,7 +356,7 @@ def memory_list(q: str = "", uid: str = Depends(current_user), db: Session = Dep
 async def memory_add(b: FactIn, uid: str = Depends(current_user), db: Session = Depends(get_db)):
     if memory.is_secret(b.text):
         raise HTTPException(422, "Пароли, ключи и номера документов в память не сохраняются")
-    f, created = await memory.add_fact(db, router_models, uid, b.text.strip(), b.kind, "manual")
+    f, created = await memory.add_fact(db, router_models, uid, b.text.strip(), b.kind, "manual", private=budget.private_only(uid))
     audit(db, uid, "memory.add" if created else "memory.refresh", f.id)
     return {**_fact_out(f), "new": created}
 
@@ -349,7 +366,7 @@ async def memory_edit(fid: str, b: FactIn, uid: str = Depends(current_user), db:
     f = _own_fact(db, fid, uid)
     if memory.is_secret(b.text):
         raise HTTPException(422, "Пароли, ключи и номера документов в память не сохраняются")
-    vec = await memory.embed_one(router_models, b.text.strip())
+    vec = None if budget.private_only(uid) else await memory.embed_one(router_models, b.text.strip())
     f.text, f.kind, f.updated = b.text.strip(), b.kind if b.kind in memory.KINDS else f.kind, now()
     f.embedding = json.dumps(vec) if vec else None
     db.commit()
