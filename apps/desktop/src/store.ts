@@ -26,6 +26,7 @@ interface S {
   tasks: Task[]; projects: Project[]; loadTasks: () => Promise<void>
   addTask: (title: string, extra?: Partial<TaskInput>) => Promise<Task | null>; setTaskStatus: (id: string, st: Task['status']) => void
   updateTask: (id: string, p: Parameters<typeof tasksApi.update>[1]) => Promise<void>; removeTask: (id: string) => Promise<void>
+  calTick: number; bumpCal: () => void   // calendar changed elsewhere (agent, reminders) -> views reload
   autos: Automation[]; toggleAuto: (id: string) => void
   emergency: boolean; setEmergency: (v: boolean) => void
   bg: Bg[]; addBg: (title: string, agent: string) => void; tickBg: () => void; cancelBg: (id: string) => void
@@ -48,7 +49,7 @@ export const useApp = create<S>((set, get) => ({
   palette: false, setPalette: palette => set({ palette }),
   toast: undefined, notify: toast => { set({ toast }); clearTimeout(timer); timer = setTimeout(() => set({ toast: undefined }), 2600) },
   messages: [], setMessages: f => set(s => ({ messages: f(s.messages) })), newChat: () => set({ messages: [], route: 'chat', browserOpen: false, convId: undefined }),
-  tasks: [], projects: [],
+  tasks: [], projects: [], calTick: 0, bumpCal: () => set(s => ({ calTick: s.calTick + 1 })),
   loadTasks: async () => {
     try { const [tasks, projects] = await Promise.all([tasksApi.list(), tasksApi.projects()]); set({ tasks, projects }) }
     catch { /* backend not ready — keep what we have */ }

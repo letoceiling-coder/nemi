@@ -279,7 +279,8 @@ def reminders_due(uid: str = Depends(current_user), db: Session = Depends(get_db
     for t in rows:
         t.reminded = True
     db.commit()
-    return [task_out(t) for t in rows]
+    from .events import due_event_reminders          # events remind before they start
+    return [{**task_out(t), "kind": "task"} for t in rows] + [{**e, "kind": "event"} for e in due_event_reminders(db, uid)]
 
 
 class ProjectIn(BaseModel):

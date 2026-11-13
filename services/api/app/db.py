@@ -106,6 +106,24 @@ class Task(Base):
     done_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
 
+class Event(Base):
+    """Calendar event, UTC. All-day events span [00:00, 00:00 next day) local."""
+    __tablename__ = "events"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=uid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
+    title: Mapped[str] = mapped_column(String(300))
+    start: Mapped[datetime] = mapped_column(index=True)
+    end: Mapped[datetime] = mapped_column()
+    all_day: Mapped[bool] = mapped_column(Boolean, default=False)
+    location: Mapped[str] = mapped_column(String(500), default="")      # address or a meeting link
+    notes: Mapped[str] = mapped_column(Text, default="")
+    remind_minutes: Mapped[int] = mapped_column(default=15)             # 0 = no reminder
+    reminded: Mapped[bool] = mapped_column(Boolean, default=False)
+    source: Mapped[str] = mapped_column(String(20), default="manual")
+    created: Mapped[datetime] = mapped_column(default=now)
+
+
 class SpendEntry(Base):
     """Cost of each paid cloud call (USD as reported by OpenRouter). No message content."""
     __tablename__ = "spend_ledger"

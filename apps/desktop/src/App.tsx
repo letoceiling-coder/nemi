@@ -23,7 +23,7 @@ import { SettingsPage } from './pages/Settings'
 import { RightPanel } from './components/RightPanel'
 import { Resizer, usePanelWidth } from './components/Resizer'
 import { useUpdates, startAutoCheck, justUpdatedTo } from './updates'
-import { startReminders, isToday, fmtDue } from './tasks'
+import { startReminders, isToday, reminderText } from './tasks'
 import { Palette } from './components/Palette'
 import { Auth } from './components/Auth'
 import { api, userKey } from './api'
@@ -216,7 +216,7 @@ function Shell() {
   useEffect(() => {
     useApp.getState().loadTasks()
     // reminders: Windows notification + toast; the list is refreshed so the bell disappears
-    return startReminders(t => { useApp.getState().notify(`Напоминание: ${t.title}${t.due ? ` — ${fmtDue(t)}` : ''}`); useApp.getState().loadTasks() })
+    return startReminders(r => { useApp.getState().notify(`${r.kind === 'event' ? 'Скоро' : 'Напоминание'}: ${reminderText(r)}`); useApp.getState().loadTasks() })
   }, [])
   useEffect(() => { justUpdatedTo().then(v => { if (v) useApp.getState().notify(`NEMI обновлён до версии ${v}`) }) }, [])
   useEffect(() => {

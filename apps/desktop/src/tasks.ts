@@ -14,6 +14,13 @@ export interface Project {
   id: string; name: string; description: string; status: 'active' | 'paused' | 'done'; color: string
   tasks: number; done: number; progress: number; created: string
 }
+/** /reminders/due item: a task, or a calendar event about to start */
+export type Reminder = (Task & { kind: 'task' }) | { kind: 'event'; id: string; title: string; start: string; location: string; remind_minutes: number }
+export function reminderText(r: Reminder): string {
+  if (r.kind === 'task') return `${r.title}${r.due ? ` — ${fmtDue(r)}` : ''}`
+  const mins = Math.max(0, Math.round((new Date(r.start).getTime() - Date.now()) / 60000))
+  return `${r.title} — ${mins ? `через ${mins} мин` : 'начинается'}${r.location ? ` · ${r.location}` : ''}`
+}
 export interface TaskInput { title: string; notes?: string; due?: string; due_time?: boolean; remind_at?: string; priority?: Priority; project_id?: string; quick?: boolean }
 
 export const tasksApi = {
@@ -22,7 +29,7 @@ export const tasksApi = {
   update: (id: string, p: Partial<Omit<TaskInput, 'quick'>> & { status?: TaskStatus; clear?: string[] }) =>
     req<Task>(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(p) }),
   remove: (id: string) => req<{ ok: boolean }>(`/tasks/${id}`, { method: 'DELETE' }),
-  dueReminders: () => req<Task[]>('/reminders/due'),
+  dueReminders: () => req<Reminder[]>('/reminders/due'),
   projects: () => req<Project[]>('/projects'),
   createProject: (name: string, description = '') => req<Project>('/projects', { method: 'POST', body: JSON.stringify({ name, description }) }),
   updateProject: (id: string, p: { name: string; description: string; status: Project['status']; color?: string }) =>
@@ -76,13 +83,13 @@ async function osNotify(title: string, body: string) {
 }
 
 /** Polls the backend every 30 s; each due reminder becomes a Windows notification + an in-app toast. */
-export function startReminders(onFire: (t: Task) => void) {
+export function startReminders(onFire: (r: Reminder) => void) {
   let stopped = false
   const tick = async () => {
     if (stopped) return
     try {
       for (const t of await tasksApi.dueReminders()) {
-        await osNotify('NEMI · напоминание', `${t.title}${t.due ? ` — ${fmtDue(t)}` : ''}`)
+        await osNotify(t.kind === 'event' ? 'NEMI · скоро встреча' : 'NEMI · напоминание', reminderText(t))
         onFire(t)
       }
     } catch { /* backend restarting: next tick */ }

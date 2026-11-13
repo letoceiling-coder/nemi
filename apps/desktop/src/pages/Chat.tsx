@@ -193,7 +193,7 @@ export default function ChatPage() {
       if (ev.type === 'budget') { budgetNotice(ev, notify); continue }
       if (ev.type === 'approval') { patch(id, m => ({ ...m, approval: { id: ev.id, run: ev.run, text: ev.text, state: 'ask' } })); continue }
       if (ev.type === 'approval_done') { patch(id, m => m.approval?.id === ev.id ? { ...m, approval: { ...m.approval, state: ev.result } } : m); continue }
-      if (ev.type === 'ui') { if (ev.action === 'open_browser' && ev.url) useApp.getState().openBrowser(ev.url); if (ev.action === 'tasks_changed') useApp.getState().loadTasks(); continue }
+      if (ev.type === 'ui') { if (ev.action === 'open_browser' && ev.url) useApp.getState().openBrowser(ev.url); if (ev.action === 'tasks_changed') useApp.getState().loadTasks(); if (ev.action === 'calendar_changed') useApp.getState().bumpCal(); continue }
       if (run.current !== my) continue
       if (ev.type === 'conversation') { useApp.getState().setConvId(ev.id); useApp.getState().loadConvs() }
       else if (ev.type === 'recall') recalled = ev.count

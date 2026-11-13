@@ -1,9 +1,12 @@
 import { useApp } from '../store'
+import { api } from '../api'
 import { fmtDue, isOverdue, isToday } from '../tasks'
 import { Resizer, usePanelWidth } from './Resizer'
-import { meetings, agents } from '../data'
+import { agents } from '../data'
+import { useEffect, useState } from 'react'
+import { calApi, CalEvent, fmtWhen, addDays, startOfDay } from '../calendar'
 import { Badge, Progress } from '../ui'
-import { CheckCircle2, Circle, Mic, Bot, Bell, Database, Cpu, HardDrive } from 'lucide-react'
+import { CheckCircle2, Circle, CalendarDays, Bot } from 'lucide-react'
 
 function Block({ title, children, onMore }: { title: string; children: React.ReactNode; onMore?: () => void }) {
   return (
@@ -18,7 +21,25 @@ function Block({ title, children, onMore }: { title: string; children: React.Rea
 }
 
 export function RightPanel() {
-  const { tasks, setTaskStatus, go, emergency, bg } = useApp()
+  const { tasks, setTaskStatus, go, emergency, bg, calTick } = useApp()
+  const [upcoming, setUpcoming] = useState<CalEvent[]>([])
+  // real service status (not the old demo list): own server, OpenRouter, S3
+  const [svc, setSvc] = useState<[string, boolean | null, string][]>([['Ваш сервер', null, ''], ['OpenRouter', null, ''], ['Хранилище S3', null, '']])
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const [ms, h] = await Promise.all([api.models(), api.health()])
+        const p = (n: string) => ms.find(m => m.provider === n)
+        setSvc([['Ваш сервер', !!p('siteaccess')?.available, p('siteaccess')?.error ?? `${p('siteaccess')?.models.length ?? 0} моделей`],
+          ['OpenRouter', !!p('openrouter')?.available, p('openrouter')?.error ?? 'резерв'], ['Хранилище S3', h.s3.ok, h.s3.error ?? h.s3.bucket ?? '']])
+      } catch { /* backend restarting */ }
+    }
+    load(); const t = setInterval(load, 5 * 60000); return () => clearInterval(t)
+  }, [])
+  useEffect(() => {
+    const load = () => calApi.range(new Date(), addDays(startOfDay(new Date()), 8)).then(es => setUpcoming(es.filter(e => new Date(e.end) > new Date()).slice(0, 3))).catch(() => {})
+    load(); const t = setInterval(load, 5 * 60000); return () => clearInterval(t)
+  }, [calTick])
   const live = bg.filter(b => b.status !== 'cancel').slice(0, 3)
   const open = tasks.filter(t => t.status !== 'done')
   const today = [...open.filter(isToday), ...open.filter(t => !isToday(t))].slice(0, 5)
@@ -50,13 +71,14 @@ export function RightPanel() {
           {live.length === 0 && <li className="text-fg3">Нет активных</li>}
         </ul>
       </Block>
-      <Block title="Ближайшие встречи" onMore={() => go('meetings')}>
-        {meetings.slice(0, 2).map(m => (
-          <button key={m.id} onClick={() => go('meetings', m.id)} className="flex w-full items-start gap-2 rounded-lg px-1.5 py-1.5 text-left hover:bg-surface2">
-            <Mic size={15} className="mt-0.5 text-info" />
-            <span className="min-w-0"><span className="block truncate text-[13px]">{m.title}</span><span className="text-[11.5px] text-fg3">{m.date} · {m.platform}</span></span>
+      <Block title="Ближайшие встречи" onMore={() => go('calendar')}>
+        {upcoming.map(e => (
+          <button key={e.id} onClick={() => go('calendar')} className="flex w-full items-start gap-2 rounded-lg px-1.5 py-1.5 text-left hover:bg-surface2">
+            <CalendarDays size={15} className="mt-0.5 shrink-0 text-info" />
+            <span className="min-w-0"><span className="block truncate text-[13px]">{e.title}</span><span className="block truncate text-[11.5px] text-fg3">{fmtWhen(e)}{e.location && ` · ${e.location}`}</span></span>
           </button>
         ))}
+        {upcoming.length === 0 && <div className="px-1.5 text-fg3">На неделю встреч нет</div>}
       </Block>
       <Block title="Активные агенты" onMore={() => go('activity')}>
         <ul className="space-y-1">
@@ -68,19 +90,12 @@ export function RightPanel() {
           ))}
         </ul>
       </Block>
-      <Block title="Уведомления">
-        <div className="space-y-1.5">
-          {[['Доступна версия 0.4.0', 'info'], ['Протокол встречи готов', 'ok'], ['Нужно подтвердить отправку письма', 'warn']].map(([t, tone]) => (
-            <div key={t} className="flex items-start gap-2 rounded-lg px-1.5 py-1 text-[13px]"><Bell size={14} className={`mt-0.5 text-${tone}`} />{t}</div>
-          ))}
-        </div>
-      </Block>
-      <Block title="Локальные сервисы">
+      <Block title="Сервисы" onMore={() => { useApp.getState().setSettingsCat('diagnostics'); go('settings') }}>
         <ul className="space-y-1 px-1.5 text-[13px]">
-          {[[Cpu, 'Ollama', 'ok'], [Database, 'Backend · Qdrant', 'ok'], [HardDrive, 'S3 Selectel', 'ok']].map(([Icon, n, s]) => {
-            const I = Icon as typeof Cpu
-            return <li key={n as string} className="flex items-center gap-2"><I size={14} className="text-fg3" /><span className="flex-1">{n as string}</span><span className={`size-2 rounded-full bg-${s as string}`} /></li>
-          })}
+          {svc.map(([n, ok, hint]) => (
+            <li key={n} className="flex items-center gap-2" title={hint}><span className="flex-1">{n}</span>
+              <span className={ok === null ? 'size-2 rounded-full bg-fg3/40' : ok ? 'size-2 rounded-full bg-ok' : 'size-2 rounded-full bg-err'} /></li>
+          ))}
         </ul>
       </Block>
     </aside>

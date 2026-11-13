@@ -16,7 +16,7 @@ import re
 import socket
 import urllib.parse
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Awaitable, Callable
 
 import httpx
@@ -382,6 +382,135 @@ async def _projects_list(ctx: Ctx, a: dict) -> str:
 _DUE = {"type": "string", "description": "локальное время ГГГГ-ММ-ДДTЧЧ:ММ или дата ГГГГ-ММ-ДД; вычисляй от current_datetime"}
 
 
+
+# ---------- calendar ----------
+def _day_bounds(v) -> tuple[datetime, datetime]:
+    d = _when(v)[0] if v else datetime.now().astimezone()
+    start = d.replace(hour=0, minute=0, second=0, microsecond=0)
+    return start, start + timedelta(days=1)
+
+
+def _fmt_event(e: dict) -> str:
+    s, en = datetime.fromisoformat(e["start"]).astimezone(), datetime.fromisoformat(e["end"]).astimezone()
+    when = f"{s:%d.%m} весь день" if e["all_day"] else f"{s:%d.%m %H:%M}–{en:%H:%M}"
+    extra = (f", {e['location']}" if e["location"] else "") + (f", проект «{e['project']}»" if e.get("project") else "")
+    return f"[{e['id']}] {when} {e['title']}{extra}"
+
+
+async def _calendar_list(ctx: Ctx, a: dict) -> str:
+    from .events import list_events
+    start, _ = _day_bounds(a.get("date_from"))
+    end = _day_bounds(a.get("date_to"))[1] if a.get("date_to") else start + timedelta(days=1)
+    if end - start > timedelta(days=62):
+        raise ToolError("слишком длинный период: не больше двух месяцев")
+    with SessionLocal() as db:
+        rows = list_events(db, ctx.uid, start, end)
+    return "\n".join(_fmt_event(e) for e in rows) or "Событий нет."
+
+
+async def _event_create(ctx: Ctx, a: dict) -> str:
+    from .events import DEFAULT_REMIND, conflicts, create_event, event_out
+    title = " ".join(str(a.get("title", "")).split())
+    if len(title) < 2:
+        raise ToolError("пустое название события")
+    start, has_time = _when(a.get("start"))
+    if not start:
+        raise ToolError("нужно время начала")
+    all_day = bool(a.get("all_day")) or not has_time
+    end, _ = _when(a.get("end"))
+    if not end and a.get("duration_minutes") and not all_day:
+        end = start + timedelta(minutes=int(a["duration_minutes"]))
+    with SessionLocal() as db:
+        pid = _project_id(db, ctx.uid, a.get("project"))
+        try:
+            e = create_event(db, ctx.uid, title, start, end, all_day=all_day, location=str(a.get("location", "")),
+                             notes=str(a.get("notes", "")), project_id=pid,
+                             remind_minutes=int(a.get("remind_minutes", DEFAULT_REMIND)), source="agent")
+        except ValueError as err:
+            raise ToolError(str(err))
+        out = event_out(e, a.get("project") or None)
+        clash = [] if e.all_day else conflicts(db, ctx.uid, start, end or start + timedelta(hours=1), e.id)
+        clash_txt = "; ".join(_fmt_event(event_out(c)) for c in clash)
+    ctx.ui.append({"action": "calendar_changed"})
+    msg = "Создано событие " + _fmt_event(out)
+    return msg + (f"\nВНИМАНИЕ: пересекается с: {clash_txt}. Сообщи об этом пользователю." if clash_txt else "")
+
+
+def _own_event(db, uid: str, eid):
+    from .db import Event
+    e = db.get(Event, str(eid or ""))
+    if not e or e.user_id != uid:
+        raise ToolError("событие не найдено — сначала найдите его через calendar_list")
+    return e
+
+
+async def _event_update(ctx: Ctx, a: dict) -> str:
+    from .events import event_out
+    from .tasks import to_utc
+    with SessionLocal() as db:
+        e = _own_event(db, ctx.uid, a.get("event_id"))
+        length = e.end - e.start
+        if a.get("title"):
+            e.title = " ".join(str(a["title"]).split())[:300]
+        if a.get("start"):
+            st, _ = _when(a["start"])
+            e.start, e.reminded = to_utc(st).replace(tzinfo=None), False
+            e.end = e.start + length
+        if a.get("end"):
+            e.end = to_utc(_when(a["end"])[0]).replace(tzinfo=None)
+        elif a.get("duration_minutes"):
+            e.end = e.start + timedelta(minutes=int(a["duration_minutes"]))
+        if e.end <= e.start:
+            raise ToolError("конец события раньше начала")
+        if "location" in a:
+            e.location = str(a.get("location") or "")[:500]
+        if a.get("remind_minutes") is not None:
+            e.remind_minutes, e.reminded = max(0, int(a["remind_minutes"])), False
+        db.commit()
+        out = event_out(e)
+    ctx.ui.append({"action": "calendar_changed"})
+    return "Обновлено: " + _fmt_event(out)
+
+
+async def _event_delete(ctx: Ctx, a: dict) -> str:
+    with SessionLocal() as db:
+        e = _own_event(db, ctx.uid, a.get("event_id"))
+        title = e.title
+        db.delete(e)
+        db.commit()
+    ctx.ui.append({"action": "calendar_changed"})
+    return f"Событие удалено: {title}"
+
+
+def _event_delete_text(ctx: Ctx, a: dict) -> str:
+    from .db import Event
+    from .events import event_out
+    with SessionLocal() as db:
+        e = db.get(Event, str(a.get("event_id", "")))
+        if not e or e.user_id != ctx.uid:
+            return "Удалить событие (не найдено)"
+        return "Удалить из календаря: " + _fmt_event(event_out(e)).split("] ", 1)[1]
+
+
+async def _day_overview(ctx: Ctx, a: dict) -> str:
+    from .events import list_events
+    from .tasks import list_tasks
+    start, end = _day_bounds(a.get("date"))
+    today = start.date() == datetime.now().astimezone().date()
+    with SessionLocal() as db:
+        evs = list_events(db, ctx.uid, start, end)
+        tasks = [t for t in list_tasks(db, ctx.uid, "all") if t["status"] != "done" and t["due"] and
+                 (datetime.fromisoformat(t["due"]).astimezone().date() == start.date() or
+                  (today and datetime.fromisoformat(t["due"]).astimezone() < start))]
+    parts = [f"День: {start:%d.%m.%Y}, {WEEKDAYS[start.weekday()]}"]
+    parts.append("Встречи и события:\n" + ("\n".join(_fmt_event(e) for e in evs) if evs else "нет"))
+    parts.append("Задачи (включая просроченные):\n" + ("\n".join(_fmt_task(t) for t in tasks) if tasks else "нет"))
+    return "\n\n".join(parts)
+
+
+_TIME = {"type": "string", "description": "локальное время ГГГГ-ММ-ДДTЧЧ:ММ (или дата ГГГГ-ММ-ДД для события на весь день)"}
+
+
 TOOLS: dict[str, Tool] = {t.name: t for t in [
     Tool("current_datetime", "Текущие дата, время, день недели и часовой пояс пользователя. Вызывай для любых вопросов о сегодняшней дате, "
          "сроках, «завтра», «через неделю».", _obj({}), "read", _now, lambda a: "Узнаю дату и время"),
@@ -433,6 +562,29 @@ TOOLS: dict[str, Tool] = {t.name: t for t in [
          lambda a: "Удаляю задачу", confirm_text=_delete_text),
     Tool("projects_list", "Проекты пользователя с числом задач и выполненных.", _obj({}), "read", _projects_list,
          lambda a: "Смотрю проекты"),
+
+    Tool("day_overview", "Сводка дня: встречи и задачи (на сегодня — с просроченными). Для «что у меня сегодня / завтра», "
+         "«план на день». date — ГГГГ-ММ-ДД, по умолчанию сегодня.",
+         _obj({"date": {"type": "string"}}), "read", _day_overview, lambda a: "Собираю план на день"),
+    Tool("calendar_list", "События календаря за период (date_from..date_to включительно, ГГГГ-ММ-ДД; по умолчанию сегодня). "
+         "Возвращает события с идентификаторами.",
+         _obj({"date_from": {"type": "string"}, "date_to": {"type": "string"}}), "read", _calendar_list,
+         lambda a: "Смотрю календарь"),
+    Tool("event_create", "Добавить событие в календарь (встреча, созвон, приём). Сначала узнай текущую дату. Длительность по умолчанию 60 минут. "
+         "Напоминание по умолчанию за 15 минут. Если в ответе есть ВНИМАНИЕ о пересечении — обязательно скажи пользователю.",
+         _obj({"title": {"type": "string"}, "start": _TIME, "end": _TIME, "duration_minutes": {"type": "integer"},
+               "all_day": {"type": "boolean"}, "location": {"type": "string", "description": "адрес или ссылка на звонок"},
+               "remind_minutes": {"type": "integer", "description": "за сколько минут напомнить, 0 — не напоминать"},
+               "project": {"type": "string"}, "notes": {"type": "string"}}, ["title", "start"]), "write", _event_create,
+         lambda a: f"Добавляю в календарь: {_short(a.get('title', ''), 40)}"),
+    Tool("event_update", "Изменить событие по идентификатору из calendar_list: перенести (start — длительность сохраняется), "
+         "изменить конец или длительность, название, место, напоминание.",
+         _obj({"event_id": {"type": "string"}, "title": {"type": "string"}, "start": _TIME, "end": _TIME,
+               "duration_minutes": {"type": "integer"}, "location": {"type": "string"}, "remind_minutes": {"type": "integer"}},
+              ["event_id"]), "write", _event_update, lambda a: "Переношу событие" if a.get("start") else "Изменяю событие"),
+    Tool("event_delete", "Удалить событие из календаря. Требует подтверждения пользователя.",
+         _obj({"event_id": {"type": "string"}}, ["event_id"]), "confirm", _event_delete,
+         lambda a: "Удаляю событие", confirm_text=_event_delete_text),
 
 ]}
 

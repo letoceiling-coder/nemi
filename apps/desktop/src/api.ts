@@ -22,7 +22,7 @@ export type ChatEvent =
   | { type: 'step'; id: string; label: string; tool: string; status: 'active' | 'done' | 'error' | 'wait'; detail?: string }
   | { type: 'approval'; id: string; run: string; tool: string; text: string }
   | { type: 'approval_done'; id: string; result: 'approved' | 'declined' | 'timeout' | 'stopped' }
-  | { type: 'ui'; action: 'open_browser' | 'tasks_changed'; url?: string }
+  | { type: 'ui'; action: 'open_browser' | 'tasks_changed' | 'calendar_changed'; url?: string }
   | { type: 'done' }
 
 export interface Budget { limit: number; spent: number; ratio: number; level: 'ok' | 'warn' | 'stop'; month: string }
