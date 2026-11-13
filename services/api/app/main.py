@@ -15,6 +15,7 @@ from . import storage
 from .auth import current_user, hash_password, make_token, verify_password
 from .config import settings
 from . import agent, budget, logs, memory
+from . import calsync
 from . import events as events_mod
 from . import tasks as tasks_mod
 from .db import AuditLog, Conversation, MemoryFact, Message, SessionLocal, User, audit, init_db, now
@@ -37,12 +38,15 @@ async def lifespan(_: FastAPI):
     logs.setup_logging()
     init_db()
     log.info("backend %s started, data_dir=%s", app.version, settings.data_dir)
+    sync_task = asyncio.create_task(calsync.loop())    # Google / Yandex import every 5 min (only if connected)
     yield
+    sync_task.cancel()
 
 
 app = FastAPI(title="Personal AI Assistant API", version="0.4.0", lifespan=lifespan)
 app.include_router(tasks_mod.router)
 app.include_router(events_mod.router)
+app.include_router(calsync.router)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["*"], allow_headers=["*"])
 
 

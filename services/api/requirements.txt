@@ -1,6 +1,7 @@
 boto3==1.44.1
 fastapi==0.162.5
 httpx==0.28.1
+icalendar==6.3.1
 keyring==25.7.0
 pydantic==2.14.3
 pydantic-settings==2.16.2

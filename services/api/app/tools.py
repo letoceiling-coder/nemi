@@ -393,7 +393,8 @@ def _day_bounds(v) -> tuple[datetime, datetime]:
 def _fmt_event(e: dict) -> str:
     s, en = datetime.fromisoformat(e["start"]).astimezone(), datetime.fromisoformat(e["end"]).astimezone()
     when = f"{s:%d.%m} весь день" if e["all_day"] else f"{s:%d.%m %H:%M}–{en:%H:%M}"
-    extra = (f", {e['location']}" if e["location"] else "") + (f", проект «{e['project']}»" if e.get("project") else "")
+    extra = (f", {e['location']}" if e["location"] else "") + (f", проект «{e['project']}»" if e.get("project") else "") + \
+        ({"google": ", из Google Календаря", "yandex": ", из Яндекс Календаря"}.get(e.get("ext_source") or "", ""))
     return f"[{e['id']}] {when} {e['title']}{extra}"
 
 
@@ -441,6 +442,8 @@ def _own_event(db, uid: str, eid):
     e = db.get(Event, str(eid or ""))
     if not e or e.user_id != uid:
         raise ToolError("событие не найдено — сначала найдите его через calendar_list")
+    if e.ext_source:
+        raise ToolError(f"это событие из внешнего календаря ({e.ext_source}) — его можно изменить только там; скажи об этом пользователю")
     return e
 
 

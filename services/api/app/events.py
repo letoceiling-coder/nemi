@@ -28,7 +28,8 @@ def _naive_utc(dt: datetime) -> datetime:
 def event_out(e: Event, pname: str | None = None) -> dict:
     return {"id": e.id, "title": e.title, "start": iso(e.start), "end": iso(e.end), "all_day": e.all_day,
             "location": e.location, "notes": e.notes, "project_id": e.project_id, "project": pname,
-            "remind_minutes": e.remind_minutes, "source": e.source, "created": iso(e.created)}
+            "remind_minutes": e.remind_minutes, "source": e.source, "created": iso(e.created),
+            "ext_source": e.ext_source, "ext_cal": e.ext_cal}
 
 
 def list_events(db: Session, uid: str, start: datetime, end: datetime) -> list[dict]:
@@ -75,10 +76,15 @@ def create_event(db: Session, uid: str, title: str, start: datetime, end: dateti
     return e
 
 
-def _own(db: Session, eid: str, uid: str) -> Event:
+EXT_NAMES = {"google": "Google Календаря", "yandex": "Яндекс Календаря"}
+
+
+def _own(db: Session, eid: str, uid: str, write: bool = False) -> Event:
     e = db.get(Event, eid)
     if not e or e.user_id != uid:
         raise HTTPException(404, "Событие не найдено")
+    if write and e.ext_source:                 # imported events are read-only: they would be overwritten by the next sync
+        raise HTTPException(409, f"Это событие из {EXT_NAMES.get(e.ext_source, e.ext_source)} — измените его там")
     return e
 
 
@@ -145,7 +151,7 @@ def events_post(b: EventIn, uid: str = Depends(current_user), db: Session = Depe
 
 @router.patch("/events/{eid}")
 def events_patch(eid: str, b: EventPatch, uid: str = Depends(current_user), db: Session = Depends(get_db)):
-    e = _own(db, eid, uid)
+    e = _own(db, eid, uid, write=True)
     length = e.end - e.start
     if b.title is not None:
         e.title = b.title.strip()
@@ -176,7 +182,7 @@ def events_patch(eid: str, b: EventPatch, uid: str = Depends(current_user), db: 
 
 @router.delete("/events/{eid}")
 def events_delete(eid: str, uid: str = Depends(current_user), db: Session = Depends(get_db)):
-    e = _own(db, eid, uid)
+    e = _own(db, eid, uid, write=True)
     db.delete(e)
     db.commit()
     audit(db, uid, "event.delete", eid)

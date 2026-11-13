@@ -3,6 +3,7 @@ import { api, ApiError } from '../api'
 import { integrations } from '../data'
 import { Page, PageHeader, Card, Badge, Button, Section, Modal, Input } from '../ui'
 import { useApp } from '../store'
+import { CalendarSync } from './CalendarSync'
 
 export function IntegrationsPage() {
   const { notify } = useApp()
@@ -32,6 +33,7 @@ export function IntegrationsPage() {
     <Page>
       <PageHeader title="Интеграции" subtitle="Каждая интеграция — отдельный плагин с минимальными правами" />
       <div className="px-8">
+        <CalendarSync />
         {kinds.map(k => (
           <Section key={k} title={k}>
             <div className="grid grid-cols-2 gap-3">

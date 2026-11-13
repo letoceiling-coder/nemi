@@ -4,7 +4,8 @@ import { req } from './api'
 export interface CalEvent {
   id: string; title: string; start: string; end: string; all_day: boolean
   location: string; notes: string; project_id: string | null; project: string | null
-  remind_minutes: number; source: 'manual' | 'agent'; created: string
+  remind_minutes: number; source: string; created: string
+  ext_source: 'google' | 'yandex' | null; ext_cal: string | null
   conflicts?: CalEvent[]
 }
 export interface EventInput { title: string; start?: string; end?: string; all_day?: boolean; location?: string; notes?: string; project_id?: string; remind_minutes?: number; quick?: boolean }

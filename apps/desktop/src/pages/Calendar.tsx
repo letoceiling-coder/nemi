@@ -25,6 +25,16 @@ function EventDialog({ ev, draftDay, onClose, onSaved }: { ev: CalEvent | null; 
     setAsk(false)
   }, [ev, draftDay])
   if (!open) return null
+  if (ev?.ext_source) return (
+    <Modal open onClose={onClose} title={ev.title} footer={<Button onClick={onClose}>Закрыть</Button>}>
+      <div className="space-y-2 text-[13px]">
+        <div className="text-fg2">{fmtTime(ev)} · {new Date(ev.start).toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
+        {ev.location && <div className="text-fg2">{ev.location}</div>}
+        {ev.notes && <div className="whitespace-pre-wrap text-fg3">{ev.notes}</div>}
+        <div className="rounded-lg bg-surface2 px-3 py-2 text-[12.5px] text-fg3">Событие из {ev.ext_source === 'google' ? 'Google Календаря' : 'Яндекс Календаря'}{ev.ext_cal ? ` («${ev.ext_cal}»)` : ''}. Изменить или удалить его можно только там — NEMI подхватит изменения при следующей синхронизации.</div>
+      </div>
+    </Modal>
+  )
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF(s => ({ ...s, [k]: e.target.value }))
   const save = async () => {
     if (!f.title.trim() || !f.start) return
@@ -84,7 +94,7 @@ export function CalendarPage() {
   useEffect(() => { load() }, [load, calTick])
   useEffect(() => { loadTasks() }, [loadTasks])
 
-  const color = (e: CalEvent) => projects.find(p => p.id === e.project_id)?.color ?? 'var(--accent)'
+  const color = (e: CalEvent) => e.ext_source === 'google' ? '#4f8ef7' : e.ext_source === 'yandex' ? '#e05a47' : projects.find(p => p.id === e.project_id)?.color ?? 'var(--accent)'
   const dayTasks = (d: Date) => tasks.filter(t => t.status !== 'done' && t.due && sameDay(new Date(t.due), d))
   const today = startOfDay(new Date())
   const selEvents = evs.filter(e => onDay(e, sel))
@@ -143,7 +153,7 @@ export function CalendarPage() {
                   <span className="w-1 shrink-0 rounded-full" style={{ background: color(e) }} />
                   <div className="min-w-0 flex-1">
                     <div className="text-[13.5px]">{e.title}</div>
-                    <div className="flex items-center gap-1.5 text-[12px] text-fg3">{fmtTime(e)}{e.remind_minutes > 0 && !e.all_day && <Bell size={11} />}{e.source === 'agent' && <Sparkles size={11} />}{e.project && <span className="truncate">· {e.project}</span>}</div>
+                    <div className="flex items-center gap-1.5 text-[12px] text-fg3">{fmtTime(e)}{e.remind_minutes > 0 && !e.all_day && <Bell size={11} />}{e.source === 'agent' && <Sparkles size={11} />}{e.ext_source && <span>· {e.ext_source === 'google' ? 'Google' : 'Яндекс'}</span>}{e.project && <span className="truncate">· {e.project}</span>}</div>
                     {e.location && (isLink(e.location)
                       ? <a href={e.location} target="_blank" rel="noreferrer" onClick={ev => ev.stopPropagation()} className="mt-1 inline-flex items-center gap-1 text-[12px] text-accent hover:underline"><Video size={12} />Подключиться</a>
                       : <div className="mt-1 flex items-center gap-1 text-[12px] text-fg3"><MapPin size={12} />{e.location}</div>)}
