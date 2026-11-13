@@ -47,7 +47,7 @@ async def lifespan(_: FastAPI):
     backup_task.cancel()
 
 
-app = FastAPI(title="Personal AI Assistant API", version="0.6.1", lifespan=lifespan)
+app = FastAPI(title="Personal AI Assistant API", version="0.7.0", lifespan=lifespan)
 app.include_router(tasks_mod.router)
 app.include_router(events_mod.router)
 app.include_router(calsync.router)
