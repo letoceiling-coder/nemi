@@ -124,6 +124,7 @@ class Event(Base):
     ext_source: Mapped[str | None] = mapped_column(String(10), nullable=True, index=True)   # google | yandex (imported, read-only)
     ext_id: Mapped[str | None] = mapped_column(String(300), nullable=True)
     ext_cal: Mapped[str | None] = mapped_column(String(300), nullable=True)                   # calendar name upstream
+    ext_ro: Mapped[bool] = mapped_column(Boolean, default=False)      # no write access upstream / recurring instance
     created: Mapped[datetime] = mapped_column(default=now)
 
 
@@ -167,7 +168,8 @@ def _migrate() -> None:
         if "tools" not in cols:
             c.exec_driver_sql("ALTER TABLE messages ADD COLUMN tools TEXT")
         ecols = {r[1] for r in c.exec_driver_sql("PRAGMA table_info(events)")}
-        for col, typ in (("ext_source", "VARCHAR(10)"), ("ext_id", "VARCHAR(300)"), ("ext_cal", "VARCHAR(300)")):
+        for col, typ in (("ext_source", "VARCHAR(10)"), ("ext_id", "VARCHAR(300)"), ("ext_cal", "VARCHAR(300)"),
+                         ("ext_ro", "BOOLEAN NOT NULL DEFAULT 0")):
             if ecols and col not in ecols:
                 c.exec_driver_sql(f"ALTER TABLE events ADD COLUMN {col} {typ}")
 

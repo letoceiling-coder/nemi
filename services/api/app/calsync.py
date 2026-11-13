@@ -1,7 +1,8 @@
-"""Import from Google Calendar (OAuth, read-only) and Yandex Calendar (CalDAV, app password) into NEMI events.
+"""Two-way sync with Google Calendar (OAuth) and Yandex Calendar (CalDAV, app password).
 
-One-way for now: external events are copied into the NEMI calendar of the user who connected the account and are
-read-only there (edit them in Google/Yandex). Each sync covers −30…+180 days; events that disappeared upstream are
+Pull: external events are copied into the NEMI calendar of the user who connected the account.
+Push: events created in NEMI go to the user's target calendar; edits/deletes of external events go upstream first
+(read-only: calendars without write access, recurring Yandex instances). Each sync covers −30…+180 days; events that disappeared upstream are
 removed. Credentials live in Windows Credential Manager; only the connecting user's id is stored in the DB.
 """
 from __future__ import annotations
@@ -31,7 +32,8 @@ router = APIRouter(prefix="/api/v1/calendar")
 PROVIDERS = {"google": "Google Календарь", "yandex": "Яндекс Календарь"}
 PAST, FUTURE = timedelta(days=30), timedelta(days=180)
 SYNC_EVERY = 300
-GOOGLE_SCOPE = "https://www.googleapis.com/auth/calendar.readonly"
+GOOGLE_SCOPE = "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly"
+WRITE_SCOPE = "https://www.googleapis.com/auth/calendar.events"
 CALDAV = "https://caldav.yandex.ru"
 _status: dict[str, dict] = {}          # provider -> {"at", "count", "error"}
 _lock = asyncio.Lock()
@@ -152,6 +154,7 @@ def _google_exchange(p: dict) -> None:
     if not rt:
         raise RuntimeError("no refresh token")
     set_secret("google_refresh_token", rt)
+    _set_setting("calsync:google:scope", r.json().get("scope", ""))
     _set_setting("calsync:google:owner", p["uid"])
     log.info("google calendar connected")
     with SessionLocal() as db:
@@ -177,6 +180,7 @@ async def fetch_google(start: datetime, end: datetime) -> list[dict]:
         h = {"Authorization": f"Bearer {await _google_token(c)}"}
         cals = (await c.get("https://www.googleapis.com/calendar/v3/users/me/calendarList", headers=h,
                             params={"minAccessRole": "reader"})).json().get("items", [])
+        can_write = WRITE_SCOPE in (_setting("calsync:google:scope") or "")
         for cal in cals:
             if not (cal.get("primary") or cal.get("selected")):
                 continue
@@ -198,7 +202,9 @@ async def fetch_google(start: datetime, end: datetime) -> list[dict]:
                         st, et, all_day = _local_midnight(date.fromisoformat(s["date"])), _local_midnight(date.fromisoformat(en["date"])), True
                     else:
                         st, et, all_day = datetime.fromisoformat(s["dateTime"]), datetime.fromisoformat(en["dateTime"]), False
-                    out.append({"ext_id": e["id"], "cal": cal.get("summary", ""), "title": e.get("summary") or "(без названия)",
+                    out.append({"ext_id": f"{cal['id']}|{e['id']}", "cal": cal.get("summary", ""),
+                                "ro": not (can_write and cal.get("accessRole") in ("owner", "writer")),
+                                "title": e.get("summary") or "(без названия)",
                                 "start": st, "end": et, "all_day": all_day,
                                 "location": e.get("hangoutLink") or e.get("location") or "", "notes": (e.get("description") or "")[:4000]})
                 token = d.get("nextPageToken")
@@ -247,8 +253,9 @@ async def fetch_yandex(start: datetime, end: datetime) -> list[dict]:
                     f'<c:time-range start="{fmt(start)}" end="{fmt(end)}"/></c:comp-filter></c:comp-filter></c:filter></c:calendar-query>')
             r = await c.request("REPORT", href, content=body, headers={"Depth": "1", "Content-Type": "application/xml"})
             r.raise_for_status()
-            for data in ET.fromstring(r.content).iterfind(".//c:calendar-data", NS):
-                if not data.text:
+            for resp in ET.fromstring(r.content).iterfind("d:response", NS):
+                data, rhref = resp.find(".//c:calendar-data", NS), resp.findtext("d:href", "", NS)
+                if data is None or not data.text:
                     continue
                 for ve in Calendar.from_ical(data.text).walk("VEVENT"):
                     ds, de = ve.get("DTSTART"), ve.get("DTEND")
@@ -261,9 +268,10 @@ async def fetch_yandex(start: datetime, end: datetime) -> list[dict]:
                     et = _local_midnight(e) if all_day else (e if e.tzinfo else e.astimezone())
                     if et <= st:                     # Yandex has zero-length "reminder" events: show them as 30 min
                         et = st + (timedelta(days=1) if all_day else timedelta(minutes=30))
-                    rid = ve.get("RECURRENCE-ID")
-                    uid = str(ve.get("UID", "")) + (f"@{rid.dt.isoformat()}" if rid else (f"@{st.isoformat()}" if ve.get("RRULE") else ""))
-                    out.append({"ext_id": uid[:300], "cal": name, "title": str(ve.get("SUMMARY") or "(без названия)"),
+                    recurring = bool(ve.get("RECURRENCE-ID") or ve.get("RRULE"))
+                    # ext_id = the .ics resource (writable); recurring instances get "#start" and stay read-only
+                    ext = rhref + (f"#{st.isoformat()}" if recurring else "")
+                    out.append({"ext_id": ext[:300], "cal": name, "ro": recurring, "title": str(ve.get("SUMMARY") or "(без названия)"),
                                 "start": st, "end": et, "all_day": all_day, "location": str(ve.get("LOCATION") or ""),
                                 "notes": str(ve.get("DESCRIPTION") or "")[:4000]})
     return out
@@ -298,7 +306,7 @@ async def sync(provider: str) -> dict:
             if e.start != new_start:
                 e.reminded = False                    # moved upstream -> remind again
             e.title, e.start, e.end, e.all_day = it["title"][:300], new_start, _naive_utc(it["end"]), it["all_day"]
-            e.location, e.notes, e.ext_cal = it["location"][:500], it["notes"], it["cal"][:300]
+            e.location, e.notes, e.ext_cal, e.ext_ro = it["location"][:500], it["notes"], it["cal"][:300], bool(it.get("ro"))
         for ext_id, e in existing.items():           # deleted upstream (within the synced window)
             if ext_id not in seen and _naive_utc(start) <= e.start <= _naive_utc(end):
                 db.delete(e)
@@ -384,3 +392,170 @@ def disconnect(provider: str, uid: str = Depends(current_user)):
         audit(db, uid, "calendar.disconnect", provider)
     _status.pop(provider, None)
     return {"ok": True, "removed": n}
+
+
+# ---------- push (NEMI -> Google / Yandex) ----------
+class PushError(Exception):
+    pass
+
+
+def target(uid: str) -> str | None:
+    t = _setting(f"calsync:target:{uid}")
+    return t if t in PROVIDERS and owner(t) == uid else None
+
+
+def can_write(e: Event, uid: str) -> bool:
+    if not e.ext_source:
+        return True
+    if e.ext_ro or owner(e.ext_source) != uid:
+        return False
+    return e.ext_source != "google" or WRITE_SCOPE in (_setting("calsync:google:scope") or "")
+
+
+def _aware(dt: datetime) -> datetime:
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+
+
+def _gtoken() -> str:
+    if WRITE_SCOPE not in (_setting("calsync:google:scope") or ""):
+        raise PushError("переподключите Google Календарь, чтобы разрешить запись")
+    r = httpx.post("https://oauth2.googleapis.com/token", timeout=20, data={
+        "client_id": get_secret("google_client_id"), "client_secret": get_secret("google_client_secret"),
+        "refresh_token": get_secret("google_refresh_token") or "", "grant_type": "refresh_token"})
+    if r.status_code != 200:
+        raise PushError("доступ к Google отозван — подключите заново")
+    return r.json()["access_token"]
+
+
+def _gbody(e: Event) -> dict:
+    s, en = _aware(e.start).astimezone(), _aware(e.end).astimezone()
+    when = (lambda d: {"date": d.date().isoformat()}) if e.all_day else (lambda d: {"dateTime": d.isoformat()})
+    return {"summary": e.title, "location": e.location or "", "description": e.notes or "", "start": when(s), "end": when(en)}
+
+
+def _ycal_href(c: httpx.Client) -> tuple[str, str]:
+    def pf(url, body, depth="0"):
+        r = c.request("PROPFIND", url, content=body, headers={"Depth": depth, "Content-Type": "application/xml"})
+        if r.status_code == 401:
+            raise PushError("Яндекс отклонил пароль приложения")
+        r.raise_for_status()
+        return ET.fromstring(r.content)
+    p = pf("/", '<d:propfind xmlns:d="DAV:"><d:prop><d:current-user-principal/></d:prop></d:propfind>').find(".//d:current-user-principal/d:href", NS).text
+    home = pf(p, '<d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><c:calendar-home-set/></d:prop></d:propfind>').find(".//c:calendar-home-set/d:href", NS).text
+    x = pf(home, '<d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><d:resourcetype/><d:displayname/>'
+                 '<c:supported-calendar-component-set/></d:prop></d:propfind>', "1")
+    for resp in x.findall("d:response", NS):
+        comps = [k.get("name") for k in resp.findall(".//c:supported-calendar-component-set/c:comp", NS)]
+        if resp.find(".//d:resourcetype/c:calendar", NS) is not None and (not comps or "VEVENT" in comps):
+            return resp.find("d:href", NS).text, (resp.findtext(".//d:displayname", "", NS) or "").strip()
+    raise PushError("в Яндекс Календаре нет календаря для событий")
+
+
+def _ics(e: Event, uid: str, base=None) -> bytes:
+    from icalendar import Calendar, Event as IEvent
+    cal = base or Calendar()
+    if base is None:
+        cal.add("prodid", "-//NEMI//RU")
+        cal.add("version", "2.0")
+        ve = IEvent()
+        ve.add("uid", uid)
+        cal.add_component(ve)
+    ve = next(iter(cal.walk("VEVENT")))
+    seq = int(ve.get("SEQUENCE", 0)) + 1 if base is not None else 0   # a bumped SEQUENCE tells other clients it changed
+    if "SEQUENCE" in ve:
+        del ve["SEQUENCE"]
+    ve.add("sequence", seq)
+    for k in ("SUMMARY", "LOCATION", "DESCRIPTION", "DTSTART", "DTEND", "DTSTAMP"):
+        if k in ve:
+            del ve[k]
+    s, en = _aware(e.start), _aware(e.end)
+    ve.add("summary", e.title)
+    if e.location:
+        ve.add("location", e.location)
+    if e.notes:
+        ve.add("description", e.notes)
+    ve.add("dtstart", s.astimezone().date() if e.all_day else s)
+    ve.add("dtend", en.astimezone().date() if e.all_day else en)
+    ve.add("dtstamp", datetime.now(timezone.utc))
+    return cal.to_ical()
+
+
+def _yclient() -> httpx.Client:
+    return httpx.Client(timeout=30, base_url=CALDAV, auth=(get_secret("yandex_caldav_login") or "", get_secret("yandex_caldav_password") or ""))
+
+
+def push_create(e: Event, provider: str) -> None:
+    """Create upstream and turn the local event into a linked one (sets ext_*). Caller commits."""
+    try:
+        if provider == "google":
+            h = {"Authorization": f"Bearer {_gtoken()}"}
+            cid = httpx.get("https://www.googleapis.com/calendar/v3/calendars/primary", headers=h, timeout=20).json()["id"]
+            r = httpx.post(f"https://www.googleapis.com/calendar/v3/calendars/{urllib.parse.quote(cid)}/events", headers=h, json=_gbody(e), timeout=20)
+            r.raise_for_status()
+            e.ext_source, e.ext_id, e.ext_cal = "google", f"{cid}|{r.json()['id']}", "основной"
+        else:
+            with _yclient() as c:
+                href, name = _ycal_href(c)
+                uid = f"nemi-{e.id}"
+                res = href.rstrip("/") + f"/{uid}.ics"
+                r = c.put(res, content=_ics(e, uid), headers={"Content-Type": "text/calendar; charset=utf-8", "If-None-Match": "*"})
+                r.raise_for_status()
+                e.ext_source, e.ext_id, e.ext_cal = "yandex", res, name
+        e.ext_ro = False
+    except PushError:
+        raise
+    except Exception as err:  # noqa: BLE001
+        raise PushError(f"не удалось записать в {PROVIDERS[provider]} ({type(err).__name__})") from err
+
+
+def push_update(e: Event) -> None:
+    try:
+        if e.ext_source == "google":
+            cid, gid = e.ext_id.split("|", 1)
+            r = httpx.patch(f"https://www.googleapis.com/calendar/v3/calendars/{urllib.parse.quote(cid)}/events/{urllib.parse.quote(gid)}",
+                            headers={"Authorization": f"Bearer {_gtoken()}"}, json=_gbody(e), timeout=20)
+            r.raise_for_status()
+        else:
+            from icalendar import Calendar
+            with _yclient() as c:
+                g = c.get(e.ext_id)
+                g.raise_for_status()
+                body = _ics(e, "", Calendar.from_ical(g.text))
+                r = c.put(e.ext_id, content=body, headers={"Content-Type": "text/calendar; charset=utf-8",
+                                                           **({"If-Match": g.headers["etag"]} if g.headers.get("etag") else {})})
+                r.raise_for_status()
+    except PushError:
+        raise
+    except Exception as err:  # noqa: BLE001
+        raise PushError(f"не удалось сохранить в {PROVIDERS.get(e.ext_source, '')} ({type(err).__name__})") from err
+
+
+def push_delete(e: Event) -> None:
+    try:
+        if e.ext_source == "google":
+            cid, gid = e.ext_id.split("|", 1)
+            r = httpx.delete(f"https://www.googleapis.com/calendar/v3/calendars/{urllib.parse.quote(cid)}/events/{urllib.parse.quote(gid)}",
+                             headers={"Authorization": f"Bearer {_gtoken()}"}, timeout=20)
+        else:
+            with _yclient() as c:
+                r = c.delete(e.ext_id)
+        if r.status_code not in (200, 204, 404, 410):          # already gone upstream is fine
+            r.raise_for_status()
+    except PushError:
+        raise
+    except Exception as err:  # noqa: BLE001
+        raise PushError(f"не удалось удалить в {PROVIDERS.get(e.ext_source, '')} ({type(err).__name__})") from err
+
+
+@router.get("/target")
+def target_get(uid: str = Depends(current_user)):
+    return {"target": target(uid) or "", "google_write": WRITE_SCOPE in (_setting("calsync:google:scope") or "")}
+
+
+@router.put("/target")
+def target_put(b: dict, uid: str = Depends(current_user)):
+    t = (b or {}).get("target") or ""
+    if t and (t not in PROVIDERS or owner(t) != uid):
+        raise HTTPException(400, "Сначала подключите этот календарь")
+    _set_setting(f"calsync:target:{uid}", t or None)
+    return {"target": t}

@@ -14,6 +14,8 @@ const calSync = {
   connectYandex: () => req<{ count: number }>('/calendar/yandex/connect', { method: 'POST' }),
   sync: () => req<{ provider: string; count?: number; error?: string }[]>('/calendar/sync', { method: 'POST' }),
   disconnect: (p: string) => req<{ removed: number }>(`/calendar/${p}`, { method: 'DELETE' }),
+  target: () => req<{ target: string; google_write: boolean }>('/calendar/target'),
+  setTarget: (target: string) => req<{ target: string }>('/calendar/target', { method: 'PUT', body: JSON.stringify({ target }) }),
 }
 const ago = (iso: string) => { const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000); return m < 1 ? 'только что' : m < 60 ? `${m} мин назад` : new Date(iso).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) }
 
@@ -23,7 +25,12 @@ export function CalendarSync() {
   const [acc, setAcc] = useState<Account[] | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [ask, setAsk] = useState<string | null>(null)
-  const load = () => calSync.accounts().then(setAcc).catch(() => setAcc([]))
+  const [tgt, setTgt] = useState<{ target: string; google_write: boolean } | null>(null)
+  const load = () => { calSync.accounts().then(setAcc).catch(() => setAcc([])); calSync.target().then(setTgt).catch(() => {}) }
+  const chooseTarget = async (t: string) => {
+    try { await calSync.setTarget(t); setTgt(s => s ? { ...s, target: t } : s); notify(t ? `Новые события будут записываться в ${t === 'google' ? 'Google' : 'Яндекс'} Календарь` : 'Новые события остаются только в NEMI') }
+    catch (e) { notify(errText(e)) }
+  }
   useEffect(() => { load() }, [])
   // Google sign-in happens in the system browser; poll until the account shows up
   useEffect(() => {
@@ -89,7 +96,19 @@ export function CalendarSync() {
         ))}
         {acc === null && <div className="flex items-center gap-2 text-fg3"><Loader2 size={14} className="spin" />Загружаю…</div>}
       </div>
-      <div className="mt-2 text-[12.5px] text-fg3">События из Google и Яндекса появляются в календаре NEMI раз в 5 минут и доступны ассистенту. Пока только чтение: изменять их нужно в исходном календаре.</div>
+      {acc?.some(a => a.mine) && (
+        <Card className="mt-3 flex items-center justify-between gap-4">
+          <div><div>Новые события из NEMI записывать в</div><div className="text-[12.5px] text-fg3">Созданные в NEMI и ассистентом события появятся и там. Изменения и удаление внешних событий в NEMI тоже уходят в исходный календарь.</div></div>
+          <select className="h-9 rounded-lg border border-line bg-surface2 px-2 text-[13px]" value={tgt?.target ?? ''} onChange={e => chooseTarget(e.target.value)} aria-label="Календарь для новых событий">
+            <option value="">Только NEMI</option>
+            {acc.filter(a => a.mine).map(a => <option key={a.provider} value={a.provider}>{a.title}</option>)}
+          </select>
+        </Card>
+      )}
+      {acc?.find(a => a.provider === 'google')?.mine && tgt && !tgt.google_write && (
+        <div className="mt-2 rounded-lg bg-warn/10 px-3 py-2 text-[12.5px] text-warn">Google подключён только на чтение. Чтобы NEMI мог записывать в Google Календарь, нажмите «Отключить» и подключите его заново — Google спросит разрешение на изменение событий.</div>
+      )}
+      <div className="mt-2 text-[12.5px] text-fg3">События из Google и Яндекса появляются в календаре NEMI раз в 5 минут и доступны ассистенту. Повторяющиеся события Яндекса и календари без права записи — только для чтения.</div>
     </Section>
   )
 }

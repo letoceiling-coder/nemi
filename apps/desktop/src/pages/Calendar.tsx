@@ -25,13 +25,13 @@ function EventDialog({ ev, draftDay, onClose, onSaved }: { ev: CalEvent | null; 
     setAsk(false)
   }, [ev, draftDay])
   if (!open) return null
-  if (ev?.ext_source) return (
+  if (ev?.ext_source && !ev.writable) return (
     <Modal open onClose={onClose} title={ev.title} footer={<Button onClick={onClose}>Закрыть</Button>}>
       <div className="space-y-2 text-[13px]">
         <div className="text-fg2">{fmtTime(ev)} · {new Date(ev.start).toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
         {ev.location && <div className="text-fg2">{ev.location}</div>}
         {ev.notes && <div className="whitespace-pre-wrap text-fg3">{ev.notes}</div>}
-        <div className="rounded-lg bg-surface2 px-3 py-2 text-[12.5px] text-fg3">Событие из {ev.ext_source === 'google' ? 'Google Календаря' : 'Яндекс Календаря'}{ev.ext_cal ? ` («${ev.ext_cal}»)` : ''}. Изменить или удалить его можно только там — NEMI подхватит изменения при следующей синхронизации.</div>
+        <div className="rounded-lg bg-surface2 px-3 py-2 text-[12.5px] text-fg3">Событие из {ev.ext_source === 'google' ? 'Google Календаря' : 'Яндекс Календаря'}{ev.ext_cal ? ` («${ev.ext_cal}»)` : ''}. Это событие доступно только для чтения (нет прав на запись или это повтор серии) — изменить его можно только там.</div>
       </div>
     </Modal>
   )
@@ -44,7 +44,8 @@ function EventDialog({ ev, draftDay, onClose, onSaved }: { ev: CalEvent | null; 
       if (ev) await calApi.update(ev.id, { ...body, ...(!f.project && { clear_project: true }) })
       else {
         const r = await calApi.create(body)
-        if (r.conflicts.length) notify(`Пересекается: ${r.conflicts.map(c => c.title).join(', ')}`)
+        if (r.push_error) notify(`Сохранено в NEMI, но ${r.push_error}`)
+        else if (r.conflicts.length) notify(`Пересекается: ${r.conflicts.map(c => c.title).join(', ')}`)
       }
       onSaved(); onClose()
     } catch (e) { notify(errText(e)) } finally { setBusy(false) }
@@ -55,7 +56,7 @@ function EventDialog({ ev, draftDay, onClose, onSaved }: { ev: CalEvent | null; 
     try { await calApi.remove(ev.id); onSaved(); onClose() } catch (e) { notify(errText(e, 'Не удалось удалить')) }
   }
   return (
-    <Modal open onClose={onClose} title={ev ? 'Событие' : 'Новое событие'} footer={<>
+    <Modal open onClose={onClose} title={ev ? (ev.ext_source ? `Событие · ${ev.ext_source === 'google' ? 'Google' : 'Яндекс'}` : 'Событие') : 'Новое событие'} footer={<>
       {ev && <Button className="mr-auto" icon={<Trash2 size={13} />} onClick={del}>{ask ? 'Точно удалить?' : 'Удалить'}</Button>}
       <Button onClick={onClose}>Отмена</Button>
       <Button variant="primary" disabled={busy || !f.title.trim()} onClick={save}>{busy ? <Loader2 size={14} className="spin" /> : 'Сохранить'}</Button></>}>
@@ -107,7 +108,7 @@ export function CalendarPage() {
       setQuick(''); load()
       const s = new Date(r.start)
       setSel(startOfDay(s)); setMonth(new Date(s.getFullYear(), s.getMonth(), 1))
-      notify(r.conflicts.length ? `Добавлено, но пересекается: ${r.conflicts.map(c => c.title).join(', ')}` : 'Событие добавлено')
+      notify(r.push_error ? `Сохранено в NEMI, но ${r.push_error}` : r.conflicts.length ? `Добавлено, но пересекается: ${r.conflicts.map(c => c.title).join(', ')}` : r.ext_source ? `Событие добавлено и записано в ${r.ext_source === 'google' ? 'Google' : 'Яндекс'}` : 'Событие добавлено')
     } catch (e) { notify(errText(e)) } finally { setBusy(false) }
   }
 

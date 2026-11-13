@@ -5,14 +5,15 @@ export interface CalEvent {
   id: string; title: string; start: string; end: string; all_day: boolean
   location: string; notes: string; project_id: string | null; project: string | null
   remind_minutes: number; source: string; created: string
-  ext_source: 'google' | 'yandex' | null; ext_cal: string | null
+  ext_source: 'google' | 'yandex' | null; ext_cal: string | null; writable: boolean
+  push_error?: string | null
   conflicts?: CalEvent[]
 }
 export interface EventInput { title: string; start?: string; end?: string; all_day?: boolean; location?: string; notes?: string; project_id?: string; remind_minutes?: number; quick?: boolean }
 
 export const calApi = {
   range: (start: Date, end: Date) => req<CalEvent[]>(`/events?start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`),
-  create: (e: EventInput) => req<CalEvent & { conflicts: CalEvent[] }>('/events', { method: 'POST', body: JSON.stringify(e) }),
+  create: (e: EventInput) => req<CalEvent & { conflicts: CalEvent[]; push_error: string | null }>('/events', { method: 'POST', body: JSON.stringify(e) }),
   update: (id: string, p: Partial<EventInput> & { clear_project?: boolean }) => req<CalEvent>(`/events/${id}`, { method: 'PATCH', body: JSON.stringify(p) }),
   remove: (id: string) => req<{ ok: boolean }>(`/events/${id}`, { method: 'DELETE' }),
 }

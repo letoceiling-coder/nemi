@@ -429,11 +429,21 @@ async def _event_create(ctx: Ctx, a: dict) -> str:
                              remind_minutes=int(a.get("remind_minutes", DEFAULT_REMIND)), source="agent")
         except ValueError as err:
             raise ToolError(str(err))
+        from . import calsync
+        pushed = ""
+        if (t := calsync.target(ctx.uid)):
+            try:
+                calsync.push_create(e, t)
+                db.commit()
+                pushed = f"\nЗаписано также в {calsync.PROVIDERS[t]}."
+            except calsync.PushError as err:
+                db.rollback()
+                pushed = f"\nВ {calsync.PROVIDERS[t]} записать не удалось: {err}. Сообщи пользователю."
         out = event_out(e, a.get("project") or None)
         clash = [] if e.all_day else conflicts(db, ctx.uid, start, end or start + timedelta(hours=1), e.id)
         clash_txt = "; ".join(_fmt_event(event_out(c)) for c in clash)
     ctx.ui.append({"action": "calendar_changed"})
-    msg = "Создано событие " + _fmt_event(out)
+    msg = "Создано событие " + _fmt_event(out) + pushed
     return msg + (f"\nВНИМАНИЕ: пересекается с: {clash_txt}. Сообщи об этом пользователю." if clash_txt else "")
 
 
@@ -442,8 +452,9 @@ def _own_event(db, uid: str, eid):
     e = db.get(Event, str(eid or ""))
     if not e or e.user_id != uid:
         raise ToolError("событие не найдено — сначала найдите его через calendar_list")
-    if e.ext_source:
-        raise ToolError(f"это событие из внешнего календаря ({e.ext_source}) — его можно изменить только там; скажи об этом пользователю")
+    from . import calsync
+    if not calsync.can_write(e, uid):
+        raise ToolError(f"это событие из внешнего календаря ({e.ext_source}) только для чтения — его можно изменить только там; скажи об этом пользователю")
     return e
 
 
@@ -469,6 +480,13 @@ async def _event_update(ctx: Ctx, a: dict) -> str:
             e.location = str(a.get("location") or "")[:500]
         if a.get("remind_minutes") is not None:
             e.remind_minutes, e.reminded = max(0, int(a["remind_minutes"])), False
+        if e.ext_source:
+            from . import calsync
+            try:
+                calsync.push_update(e)
+            except calsync.PushError as err:
+                db.rollback()
+                raise ToolError(str(err))
         db.commit()
         out = event_out(e)
     ctx.ui.append({"action": "calendar_changed"})
@@ -479,6 +497,12 @@ async def _event_delete(ctx: Ctx, a: dict) -> str:
     with SessionLocal() as db:
         e = _own_event(db, ctx.uid, a.get("event_id"))
         title = e.title
+        if e.ext_source:
+            from . import calsync
+            try:
+                calsync.push_delete(e)
+            except calsync.PushError as err:
+                raise ToolError(str(err))
         db.delete(e)
         db.commit()
     ctx.ui.append({"action": "calendar_changed"})
