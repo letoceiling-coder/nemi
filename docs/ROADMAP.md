@@ -43,8 +43,10 @@ Email Agent · Telegram · другие мессенджеры · перепис
 ## PHASE 7 — CONTENT & PUBLISHING ⬜
 Research Agent · Content Agent · статьи · новости · объявления · CMS · публикации · контроль статусов.
 
-## PHASE 8 — UPDATE & RELEASE SYSTEM ⬜
+## PHASE 8 — UPDATE & RELEASE SYSTEM 🟡
 Версионирование · Git tags · CI/CD · подпись релизов · Update Manifest · проверка обновлений · установка · Rollback · Changelog.
+
+Сделано 2026-11-13: подписанные обновления в один клик («Настройки → Обновления», значок в верхней панели), манифест `https://nemi.siteaccess.ru/updates/latest.json`, `scripts/release.ps1` (версия, подпись, `docs/CHANGELOG.md`, выкладка), git-теги `vX.Y.Z`. Нет: CI/CD, подпись кода Windows (SmartScreen), откат на прошлую версию.
 
 ## Ближайшие шаги (порядок)
 1. ~~История диалогов из БД в боковой панели чата~~ — готово 2026-11-12.

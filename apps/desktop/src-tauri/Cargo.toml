@@ -1,6 +1,6 @@
 [package]
 name = "nemi"
-version = "0.1.1"
+version = "0.1.2"
 description = "NEMI — personal AI assistant"
 edition = "2021"
 
